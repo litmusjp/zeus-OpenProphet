@@ -1,10 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSystemPrompt, hasOpenCodeCredential, tradeEventFromToolUse } from '../agent/harness.js';
+import { buildSystemPrompt, getOpenCodeEnvCredential, hasOpenCodeCredential, tradeEventFromToolUse } from '../agent/harness.js';
 import { createGoLogLineBuffer, shouldShowGoLogLine } from '../agent/orchestrator.js';
 
 test('OpenCode authentication accepts a Zen API key without Anthropic credentials', () => {
   assert.equal(hasOpenCodeCredential('', { OPENCODE_API_KEY: 'zen-key' }), true);
+  assert.equal(getOpenCodeEnvCredential({ OPENAI_API_KEY: 'openai-key' }), 'OPENAI_API_KEY');
+  assert.equal(hasOpenCodeCredential('', { OPENAI_API_KEY: 'openai-key' }), true);
+  assert.equal(hasOpenCodeCredential('', { OPENAI_API_KEY: '   ' }), false);
   assert.equal(hasOpenCodeCredential('', {}), false);
 });
 
@@ -19,6 +22,7 @@ test('routine Go HTTP access logs stay out of agent terminals', () => {
   assert.equal(shouldShowGoLogLine('[GIN] 2026/09/03 - 01:25:46 | 200 | 90.261461ms | 127.0.0.1 | GET "/api/v1/account"'), false);
   assert.equal(shouldShowGoLogLine('[GIN] 2026/09/03 - 01:25:46 | 204 | 1.1ms | 127.0.0.1 | CONNECT "/stream"'), false);
   assert.equal(shouldShowGoLogLine('\x1b[32m[GIN]\x1b[0m 2026/09/03 - 01:25:46 | 302 | 1.1ms | 127.0.0.1 | TRACE "/redirect"'), false);
+  assert.equal(shouldShowGoLogLine('[GIN-debug] GET /health --> healthHandler'), false);
   assert.equal(shouldShowGoLogLine('[GIN] 2026/09/03 - 01:25:46 | 500 | 90.261461ms | 127.0.0.1 | GET "/api/v1/account"'), true);
   assert.equal(shouldShowGoLogLine('level=info msg="Activity logging session started"'), true);
   assert.equal(shouldShowGoLogLine('[GIN] panic recovered while serving request'), true);

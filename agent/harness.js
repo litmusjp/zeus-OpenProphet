@@ -136,8 +136,20 @@ Tune cadence with apply_heartbeat_profile ("active" | "passive" | "long_horizon"
 }
 
 // ── Check CLI auth ─────────────────────────────────────────────────
+const OPENCODE_ENV_CREDENTIALS = [
+  'OPENCODE_API_KEY',
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'GOOGLE_API_KEY',
+  'GEMINI_API_KEY',
+];
+
+export function getOpenCodeEnvCredential(env = process.env) {
+  return OPENCODE_ENV_CREDENTIALS.find(key => String(env[key] || '').trim()) || null;
+}
+
 export function hasOpenCodeCredential(output = '', env = process.env) {
-  if (env.OPENCODE_API_KEY || env.ANTHROPIC_API_KEY) return true;
+  if (getOpenCodeEnvCredential(env)) return true;
 
   const clean = String(output).replace(/\x1b\[[0-9;]*m/g, '');
   return clean.split('\n').some(line =>

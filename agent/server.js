@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 import { spawn, execSync } from 'child_process';
 import { randomBytes } from 'crypto';
 import axios from 'axios';
-import { AgentHarness, buildSystemPrompt, hasOpenCodeCredential } from './harness.js';
+import { AgentHarness, buildSystemPrompt, getOpenCodeEnvCredential, hasOpenCodeCredential } from './harness.js';
 import ChatStore from './chat-store.js';
 import AgentOrchestrator from './orchestrator.js';
 import { alpacaTradingUrl, DEFAULT_AGENT_MODEL } from './defaults.js';
@@ -1528,7 +1528,7 @@ app.get('/api/portfolio/orders', async (req, res) => {
 app.get('/api/auth/status', (req, res) => {
   // API key in env is the fastest check
   if (hasOpenCodeCredential('', process.env)) {
-    const envProvider = process.env.OPENCODE_API_KEY ? 'OpenCode Zen' : 'Anthropic';
+    const envProvider = getOpenCodeEnvCredential(process.env)?.replace('_API_KEY', '') || 'Provider';
     return res.json({
       loggedIn: true,
       authMethod: 'api_key',
