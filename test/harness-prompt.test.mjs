@@ -80,6 +80,8 @@ test('tradeEventFromToolUse recognizes every order execution tool', () => {
 test('default system prompt carries the mandate, decision loop, risk discipline, and learning loop', async () => {
   const p = await buildSystemPrompt({ name: 'Prophet' }, {});
   assert.ok(p.includes('You are Prophet'), 'names the agent');
+  assert.ok(p.includes('prophet_get_datetime'), 'uses the OpenCode MCP namespace');
+  assert.ok(p.includes('exact registered names'), 'explains MCP tool naming');
   assert.ok(/Preserve capital/.test(p), 'states capital-preservation mandate');
   assert.ok(p.includes('## Your Heartbeat Loop'), 'has the ordered decision loop');
   assert.ok(p.includes('Risk Discipline'), 'has hard risk discipline');
