@@ -924,6 +924,9 @@ app.get('/api/sandboxes/:id/state', (req, res) => {
 app.post('/api/sandboxes/:id/start', async (req, res) => {
   try {
     if (isActiveSandbox(req.params.id)) {
+      // Keep the legacy active harness aligned when the first account was added after startup
+      // or when an active account changed without a successful rebind.
+      if (harness?.sandboxId !== req.params.id) rebindHarness();
       const account = getActiveAccount();
       if (!goReady && account) await startGoBackend(account);
       await harness.start();
@@ -1236,7 +1239,12 @@ app.get('/api/accounts', (req, res) => {
 
 app.post('/api/accounts', async (req, res) => {
   try {
+    const hadActiveSandbox = Boolean(getActiveSandbox());
     const account = await addAccount(req.body);
+    // A first account creates the active sandbox after the global harness was constructed
+    // during startup. Rebind it before the user can press Start, otherwise it has sandboxId
+    // null and reports "Sandbox not found: unknown".
+    if (!hadActiveSandbox && getActiveSandbox()?.accountId === account.id) rebindHarness();
     broadcast('config', safeConfig());
     res.json({ ok: true, account: { ...account, secretKey: '****' } });
   } catch (err) { res.status(400).json({ error: err.message }); }
