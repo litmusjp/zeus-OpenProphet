@@ -36,9 +36,9 @@ function portOffsetForSandbox(sandboxId) {
 
 export function shouldShowGoLogLine(line) {
   const clean = String(line).replace(/\x1b\[[0-9;]*m/g, '');
-  if (clean.startsWith('[GIN-debug]')) return false;
+  if (/\[GIN-debug\]/.test(clean)) return false;
   const accessLog = clean.match(
-    /^\[GIN\]\s+\d{4}\/\d{2}\/\d{2}\s+-\s+.*?\|\s*(\d{3})\s*\|.*?\|\s*[A-Z]+\s+"/,
+    /\[GIN\]\s+\d{4}\/\d{2}\/\d{2}\s+-\s+.*?\|\s*(\d{3})\s*\|.*?\|\s*[A-Z]+\s+"/,
   );
   return !accessLog || Number(accessLog[1]) >= 400;
 }

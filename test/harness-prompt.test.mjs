@@ -23,6 +23,8 @@ test('routine Go HTTP access logs stay out of agent terminals', () => {
   assert.equal(shouldShowGoLogLine('[GIN] 2026/09/03 - 01:25:46 | 204 | 1.1ms | 127.0.0.1 | CONNECT "/stream"'), false);
   assert.equal(shouldShowGoLogLine('\x1b[32m[GIN]\x1b[0m 2026/09/03 - 01:25:46 | 302 | 1.1ms | 127.0.0.1 | TRACE "/redirect"'), false);
   assert.equal(shouldShowGoLogLine('[GIN-debug] GET /health --> healthHandler'), false);
+  assert.equal(shouldShowGoLogLine('[go] [GIN-debug] GET /health --> healthHandler'), false);
+  assert.equal(shouldShowGoLogLine('[go] [GIN] 2026/09/03 - 01:25:46 | 200 | 1.1ms | 127.0.0.1 | GET "/health"'), false);
   assert.equal(shouldShowGoLogLine('[GIN] 2026/09/03 - 01:25:46 | 500 | 90.261461ms | 127.0.0.1 | GET "/api/v1/account"'), true);
   assert.equal(shouldShowGoLogLine('level=info msg="Activity logging session started"'), true);
   assert.equal(shouldShowGoLogLine('[GIN] panic recovered while serving request'), true);
