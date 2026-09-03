@@ -28,7 +28,7 @@ ENV NODE_ENV=production \
     SERVER_HOST=127.0.0.1 \
     DATABASE_PATH=/app/data/prophet_trader.db
 # opencode CLI for the per-heartbeat LLM subprocess (package is opencode-ai)
-RUN npm install -g opencode-ai@1.17.20 && rm -rf /root/.npm
+RUN npm install -g opencode-ai@1.18.27 && rm -rf /root/.npm
 COPY --from=nodedeps /app/node_modules ./node_modules
 COPY . .
 COPY --from=gobuild /src/prophet_bot ./prophet_bot
