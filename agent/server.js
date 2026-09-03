@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 import { spawn, execSync } from 'child_process';
 import { randomBytes } from 'crypto';
 import axios from 'axios';
-import { AgentHarness, buildSystemPrompt } from './harness.js';
+import { AgentHarness, buildSystemPrompt, hasOpenCodeCredential } from './harness.js';
 import ChatStore from './chat-store.js';
 import AgentOrchestrator from './orchestrator.js';
 import { alpacaTradingUrl, DEFAULT_AGENT_MODEL } from './defaults.js';
@@ -1519,21 +1519,21 @@ app.get('/api/portfolio/orders', async (req, res) => {
 // ── Auth (OpenCode) ────────────────────────────────────────────────
 app.get('/api/auth/status', (req, res) => {
   // API key in env is the fastest check
-  if (process.env.ANTHROPIC_API_KEY) {
+  if (hasOpenCodeCredential('', process.env)) {
+    const envProvider = process.env.OPENCODE_API_KEY ? 'OpenCode Zen' : 'Anthropic';
     return res.json({
       loggedIn: true,
       authMethod: 'api_key',
       provider: 'opencode',
-      raw: 'ANTHROPIC_API_KEY set in environment',
+      raw: `${envProvider} API key set in environment`,
     });
   }
   try {
     const out = execSync('opencode auth list 2>&1', { timeout: 5000, encoding: 'utf-8' });
-    // Parse the table output - look for "Anthropic" with "oauth" or any credential
-    const hasAnthropicAuth = out.includes('Anthropic') && (out.includes('oauth') || out.includes('api-key'));
+    const loggedIn = hasOpenCodeCredential(out, {});
     res.json({
-      loggedIn: hasAnthropicAuth,
-      authMethod: hasAnthropicAuth ? 'opencode_oauth' : 'none',
+      loggedIn,
+      authMethod: loggedIn ? 'opencode_credential' : 'none',
       provider: 'opencode',
       raw: out.replace(/\x1b\[[0-9;]*m/g, '').trim(), // strip ANSI codes
     });

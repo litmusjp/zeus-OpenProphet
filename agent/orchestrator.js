@@ -34,6 +34,33 @@ function portOffsetForSandbox(sandboxId) {
   return hash;
 }
 
+export function shouldShowGoLogLine(line) {
+  const clean = String(line).replace(/\x1b\[[0-9;]*m/g, '');
+  const accessLog = clean.match(
+    /^\[GIN\]\s+\d{4}\/\d{2}\/\d{2}\s+-\s+.*?\|\s*(\d{3})\s*\|.*?\|\s*[A-Z]+\s+"/,
+  );
+  return !accessLog || Number(accessLog[1]) >= 400;
+}
+
+export function createGoLogLineBuffer(onLine) {
+  let remainder = '';
+  const emit = line => {
+    const message = line.trim();
+    if (message) onLine(message);
+  };
+  return {
+    push(chunk) {
+      const lines = (remainder + chunk.toString()).split('\n');
+      remainder = lines.pop() || '';
+      for (const line of lines) emit(line);
+    },
+    flush() {
+      emit(remainder);
+      remainder = '';
+    },
+  };
+}
+
 export class AgentOrchestrator extends EventEmitter {
   constructor(options = {}) {
     super();
@@ -188,27 +215,21 @@ export class AgentOrchestrator extends EventEmitter {
 
     runtime.goReady = false;
 
-    runtime.goProc.stdout.on('data', chunk => {
-      const message = chunk.toString().trim();
-      if (message) {
+    const captureGoOutput = (stream, level) => {
+      const buffer = createGoLogLineBuffer(message => {
+        if (!shouldShowGoLogLine(message)) return;
         this.emit('agent_log', {
           sandboxId,
-          level: 'info',
+          level,
           message: `[go:${runtime.port}] ${message}`,
         });
-      }
-    });
+      });
+      stream.on('data', chunk => buffer.push(chunk));
+      stream.on('end', () => buffer.flush());
+    };
 
-    runtime.goProc.stderr.on('data', chunk => {
-      const message = chunk.toString().trim();
-      if (message) {
-        this.emit('agent_log', {
-          sandboxId,
-          level: 'warning',
-          message: `[go:${runtime.port}] ${message}`,
-        });
-      }
-    });
+    captureGoOutput(runtime.goProc.stdout, 'info');
+    captureGoOutput(runtime.goProc.stderr, 'warning');
 
     runtime.goProc.on('exit', (code, signal) => {
       runtime.goReady = false;

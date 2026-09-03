@@ -1,6 +1,41 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSystemPrompt, tradeEventFromToolUse } from '../agent/harness.js';
+import { buildSystemPrompt, hasOpenCodeCredential, tradeEventFromToolUse } from '../agent/harness.js';
+import { createGoLogLineBuffer, shouldShowGoLogLine } from '../agent/orchestrator.js';
+
+test('OpenCode authentication accepts a Zen API key without Anthropic credentials', () => {
+  assert.equal(hasOpenCodeCredential('', { OPENCODE_API_KEY: 'zen-key' }), true);
+  assert.equal(hasOpenCodeCredential('', {}), false);
+});
+
+test('OpenCode authentication accepts any configured provider from auth list', () => {
+  assert.equal(hasOpenCodeCredential('●  OpenCode Zen api', {}), true);
+  assert.equal(hasOpenCodeCredential('●  Anthropic oauth', {}), true);
+  assert.equal(hasOpenCodeCredential('●  custom-provider wellknown', {}), true);
+  assert.equal(hasOpenCodeCredential('└  0 credentials', {}), false);
+});
+
+test('routine Go HTTP access logs stay out of agent terminals', () => {
+  assert.equal(shouldShowGoLogLine('[GIN] 2026/09/03 - 01:25:46 | 200 | 90.261461ms | 127.0.0.1 | GET "/api/v1/account"'), false);
+  assert.equal(shouldShowGoLogLine('[GIN] 2026/09/03 - 01:25:46 | 204 | 1.1ms | 127.0.0.1 | CONNECT "/stream"'), false);
+  assert.equal(shouldShowGoLogLine('\x1b[32m[GIN]\x1b[0m 2026/09/03 - 01:25:46 | 302 | 1.1ms | 127.0.0.1 | TRACE "/redirect"'), false);
+  assert.equal(shouldShowGoLogLine('[GIN] 2026/09/03 - 01:25:46 | 500 | 90.261461ms | 127.0.0.1 | GET "/api/v1/account"'), true);
+  assert.equal(shouldShowGoLogLine('level=info msg="Activity logging session started"'), true);
+  assert.equal(shouldShowGoLogLine('[GIN] panic recovered while serving request'), true);
+});
+
+test('Go log buffering classifies complete lines instead of stream fragments', () => {
+  const lines = [];
+  const buffer = createGoLogLineBuffer(line => {
+    if (shouldShowGoLogLine(line)) lines.push(line);
+  });
+  buffer.push('[GIN] 2026/09/03 - 01:25:46 | 200 | 90.2ms | 127.0.0.1 | GE');
+  buffer.push('T "/api/v1/account"\nmeaningful back');
+  buffer.push('end event');
+  assert.deepEqual(lines, []);
+  buffer.flush();
+  assert.deepEqual(lines, ['meaningful backend event']);
+});
 
 test('tradeEventFromToolUse is exposed for deterministic trade telemetry', () => {
   assert.equal(typeof tradeEventFromToolUse, 'function');

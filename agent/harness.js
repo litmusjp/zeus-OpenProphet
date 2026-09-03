@@ -136,13 +136,21 @@ Tune cadence with apply_heartbeat_profile ("active" | "passive" | "long_horizon"
 }
 
 // ── Check CLI auth ─────────────────────────────────────────────────
+export function hasOpenCodeCredential(output = '', env = process.env) {
+  if (env.OPENCODE_API_KEY || env.ANTHROPIC_API_KEY) return true;
+
+  const clean = String(output).replace(/\x1b\[[0-9;]*m/g, '');
+  return clean.split('\n').some(line =>
+    /^[^\w]*[●*]\s+.+\s+\S+\s*$/i.test(line.trim()),
+  );
+}
+
 export function checkCliAuth() {
-  // API key in env takes precedence — OpenCode picks it up automatically
-  if (process.env.ANTHROPIC_API_KEY) return true;
+  // Provider API keys in the environment take precedence.
+  if (hasOpenCodeCredential('', process.env)) return true;
   try {
     const out = execSync('opencode auth list 2>&1', { timeout: 5000, encoding: 'utf-8' });
-    // Look for Anthropic credential (oauth or env) in the output
-    return out.includes('Anthropic');
+    return hasOpenCodeCredential(out, {});
   } catch {
     return false;
   }
@@ -293,7 +301,7 @@ export class AgentHarness {
 
     // Check CLI auth
     if (!this.checkCliAuthFn()) {
-      throw new Error('OpenCode not authenticated. Run "opencode auth login" or set ANTHROPIC_API_KEY in .env');
+      throw new Error('OpenCode not authenticated. Run "opencode auth login" or configure the API key for your selected provider (for example OPENCODE_API_KEY or ANTHROPIC_API_KEY).');
     }
 
     await this.reloadConfig({ resetSession: true, silent: true });
