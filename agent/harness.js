@@ -32,6 +32,26 @@ export function getCurrentPhase() {
   return 'closed';
 }
 
+export function tradeEventFromToolUse(fullToolName, toolInput = {}) {
+  const tool = String(fullToolName || '').replace('prophet_', '');
+  const defaultSides = {
+    place_buy_order: 'buy',
+    place_sell_order: 'sell',
+    place_options_order: null,
+    place_managed_position: 'buy',
+    close_managed_position: 'sell',
+  };
+  if (!Object.hasOwn(defaultSides, tool)) return null;
+  return {
+    type: 'order',
+    tool,
+    symbol: toolInput.symbol || '??',
+    side: toolInput.side || defaultSides[tool] || 'unknown',
+    quantity: toolInput.quantity || toolInput.qty,
+    price: toolInput.limit_price,
+  };
+}
+
 // ── System Prompt Builder ──────────────────────────────────────────
 export async function buildSystemPrompt(agentConfig, options = {}) {
   const { getStrategyById = () => null } = options;
@@ -854,17 +874,12 @@ ${userBlock}`;
         const resultStr = typeof toolOutput === 'string' ? toolOutput : JSON.stringify(toolOutput);
         this.state.emit('tool_result', { name: toolName, result: resultStr.substring(0, 500), beat: beatNum });
 
-        // Track trades
-        if (fullToolName.includes('buy') || fullToolName.includes('sell') || fullToolName.includes('order') || fullToolName.includes('managed')) {
+        // Track only tools that execute trades. Read-only tools such as
+        // get_orders and get_managed_positions must not inflate trade telemetry.
+        const trade = tradeEventFromToolUse(fullToolName, toolInput);
+        if (trade) {
           this.state.stats.trades++;
-          this.state.addTrade({
-            type: 'order',
-            tool: toolName,
-            symbol: toolInput.symbol || '??',
-            side: toolInput.side || (fullToolName.includes('buy') ? 'buy' : 'sell'),
-            quantity: toolInput.quantity || toolInput.qty,
-            price: toolInput.limit_price,
-          });
+          this.state.addTrade(trade);
         }
         break;
       }

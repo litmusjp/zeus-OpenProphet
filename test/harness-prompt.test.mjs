@@ -1,6 +1,42 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSystemPrompt } from '../agent/harness.js';
+import { buildSystemPrompt, tradeEventFromToolUse } from '../agent/harness.js';
+
+test('tradeEventFromToolUse is exposed for deterministic trade telemetry', () => {
+  assert.equal(typeof tradeEventFromToolUse, 'function');
+});
+
+test('tradeEventFromToolUse recognizes a stock buy execution', () => {
+  assert.deepEqual(
+    tradeEventFromToolUse('prophet_place_buy_order', {
+      symbol: 'AAPL', quantity: 2, limit_price: 205.5,
+    }),
+    {
+      type: 'order', tool: 'place_buy_order', symbol: 'AAPL',
+      side: 'buy', quantity: 2, price: 205.5,
+    },
+  );
+});
+
+test('tradeEventFromToolUse ignores read-only order and position tools', () => {
+  for (const tool of ['get_managed_positions', 'get_orders', 'get_options_positions']) {
+    assert.equal(tradeEventFromToolUse(`prophet_${tool}`, {}), null, tool);
+  }
+});
+
+test('tradeEventFromToolUse recognizes every order execution tool', () => {
+  const cases = [
+    ['place_sell_order', {}, 'sell'],
+    ['place_options_order', { side: 'buy' }, 'buy'],
+    ['place_managed_position', {}, 'buy'],
+    ['close_managed_position', {}, 'sell'],
+  ];
+  for (const [tool, input, side] of cases) {
+    const event = tradeEventFromToolUse(`prophet_${tool}`, { symbol: 'SPY', ...input });
+    assert.equal(event?.tool, tool, tool);
+    assert.equal(event?.side, side, `${tool} side`);
+  }
+});
 
 test('default system prompt carries the mandate, decision loop, risk discipline, and learning loop', async () => {
   const p = await buildSystemPrompt({ name: 'Prophet' }, {});
