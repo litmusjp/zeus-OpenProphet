@@ -963,6 +963,7 @@
               <input type="text" id="perm-blocked" placeholder="e.g. place_order, close_position" onchange="savePermissions()">
               <div class="form-hint">Leave empty to allow all tools. Block specific tools by name.</div>
             </div>
+            <div id="tool-descriptions" style="margin-top:16px"></div>
           </div>
         </div>
 
@@ -1994,6 +1995,88 @@ async function loadVerifiedTrades() {
   } finally { verifiedTradesLoading=false; }
 }
 
+const TOOL_REFERENCE = {
+  Trading: {
+    get_account: 'Reads cash, buying power, portfolio value, and account status.',
+    get_positions: 'Lists current open stock and option positions.',
+    get_orders: 'Lists submitted orders and their current statuses.',
+    place_buy_order: 'Submits a stock or option buy order.',
+    place_sell_order: 'Submits a stock or option sell order.',
+    place_managed_position: 'Opens a position with automated stop-loss and take-profit management.',
+    get_managed_positions: 'Lists positions managed by the trading service.',
+    close_managed_position: 'Closes a managed position.',
+    cancel_order: 'Cancels an open order by broker order ID.',
+  },
+  Options: {
+    place_options_order: 'Submits an options order with contract, side, quantity, and pricing details.',
+    get_options_positions: 'Lists current options positions.',
+    get_options_position: 'Reads one options position by symbol or contract.',
+    get_options_chain: 'Retrieves available option contracts and quotes for an underlying symbol.',
+  },
+  'Market Data': {
+    get_quote: 'Gets the latest quote for a symbol.',
+    get_latest_bar: 'Gets the latest OHLCV price bar.',
+    get_historical_bars: 'Retrieves historical OHLCV bars for analysis.',
+    analyze_stocks: 'Calculates technical indicators, trend, support, and resistance.',
+  },
+  News: {
+    get_news: 'Retrieves recent market or symbol news.',
+    search_news: 'Searches news sources for a topic or symbol.',
+    get_market_news: 'Gets a current market-news digest.',
+    get_quick_market_intelligence: 'Builds a compact market intelligence snapshot.',
+    get_cleaned_news: 'Returns normalized and cleaned news articles.',
+    get_marketwatch_topstories: 'Retrieves MarketWatch top stories.',
+    get_marketwatch_realtime: 'Retrieves MarketWatch real-time market coverage.',
+  },
+  Intelligence: {
+    aggregate_and_summarize_news: 'Aggregates news and creates a summary.',
+    list_news_summaries: 'Lists saved news summaries.',
+    get_news_summary: 'Reads a saved news summary by identifier.',
+  },
+  'Agent Config': {
+    list_sandboxes: 'Lists accounts/sandboxes, assigned agents, models, and runtime status.',
+    update_agent_prompt: 'Updates an agent identity or custom system prompt.',
+    update_strategy_rules: 'Creates or updates strategy rules for the active sandbox.',
+    get_agent_config: 'Reads the current agent, strategy, heartbeat, and permissions.',
+    set_heartbeat: 'Requests a runtime heartbeat interval override when policy permits.',
+    update_permissions: 'Changes trading permissions and risk guardrails.',
+    set_session_mode: 'Sets continuous or fresh OpenCode session behavior.',
+    create_agent: 'Creates a new agent persona.',
+    create_strategy: 'Creates a new strategy with trading rules.',
+    assign_agent_to_sandbox: 'Assigns an agent to an account/sandbox.',
+  },
+  Heartbeat: {
+    get_heartbeat_profiles: 'Lists predefined heartbeat schedules.',
+    apply_heartbeat_profile: 'Applies a predefined heartbeat schedule.',
+    get_heartbeat_phases: 'Reads market-phase time ranges.',
+    update_heartbeat_phase: 'Changes the time range for a market phase.',
+  },
+  Logging: {
+    log_decision: 'Records a trading decision and its reasoning.',
+    log_activity: 'Records an activity note in the account log.',
+    get_activity_log: 'Reads the current account activity log.',
+    get_session_context: 'Retrieves compact prior sessions and decision/tool context.',
+  },
+  'Trade History': {
+    find_similar_setups: 'Finds historically similar trade setups for comparison.',
+    store_trade_setup: 'Stores a trade thesis and outcome for future learning.',
+    get_trade_stats: 'Returns resolved trade statistics and performance metrics.',
+  },
+  Utility: {
+    get_datetime: 'Returns current time and market phase information.',
+    wait: 'Pauses execution for a requested short duration.',
+  },
+};
+
+function renderToolReference() {
+  const el = document.getElementById('tool-descriptions');
+  if (!el) return;
+  el.innerHTML = '<div class="section-title" style="font-size:12px;margin-bottom:8px">Tool Reference</div>'
+    + '<div class="form-hint" style="margin-bottom:10px">Names below are the exact names used in the blocked-tools field. Blocking a tool prevents the agent from calling it.</div>'
+    + Object.entries(TOOL_REFERENCE).map(([category, tools]) => '<div style="margin-top:10px"><div style="font-size:11px;font-weight:600;color:var(--accent-light);margin-bottom:4px">' + esc(category) + '</div>'
+      + Object.entries(tools).map(([name, description]) => '<div style="display:grid;grid-template-columns:minmax(180px,260px) 1fr;gap:10px;padding:4px 0;border-bottom:1px solid var(--rule-light);font-size:11px;line-height:1.45"><code style="color:var(--accent);white-space:nowrap">' + esc(name) + '</code><span style="color:var(--ink-muted)">' + esc(description) + '</span></div>').join('') + '</div>').join('');
+}
+
 // ── Legacy live card compatibility ─────────
 function addTradeCard(trade) { loadVerifiedTrades(); }
 
@@ -2002,7 +2085,7 @@ function renderAll() {
   renderSandboxSelector();
   renderSandboxTabs();
   renderAgents(); renderStrategies(); renderAccounts();
-  renderHeartbeat(); renderPermissions(); renderSlack(); renderPromptPreview();
+  renderHeartbeat(); renderPermissions(); renderSlack(); renderPromptPreview(); renderToolReference();
   document.getElementById('footer-model').textContent = ((sandboxScoped.agent?.model || config.activeModel || '--')).replace('claude-','').split('-202')[0];
 }
 
