@@ -447,8 +447,13 @@
     .trade-card .trade-details { font-size: 12px; color: var(--ink-muted); margin-top: 4px; }
     .trade-card .trade-time { font-size: 11px; color: var(--ink-faint); font-family: 'IBM Plex Mono', monospace; }
     .trade-analytics-card { border: 1px solid var(--rule); background: var(--paper); padding: 14px; margin-bottom: 18px; }
-    .trade-chart-toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+    .trade-chart-toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+    .trade-chart-controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:11px; color:var(--ink-muted); }
+    .trade-chart-controls select { margin-left:4px; padding:4px 7px; border:1px solid var(--rule); background:var(--paper); color:var(--ink); border-radius:3px; font-size:11px; }
+    .trade-account-toggle { display:flex; align-items:center; gap:4px; white-space:nowrap; cursor:pointer; }
+    .trade-account-toggle input { accent-color:var(--accent); }
     .trade-chart-legend { display:flex; gap:16px; font-size:11px; color:var(--ink-muted); }
+
     .legend-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; }
     .legend-dot.litmus1 { background:#4f8cff; } .legend-dot.litmus2 { background:#c084fc; }
     .trade-chart-summary { font-size:12px; color:var(--ink-muted); margin:12px 0 4px; }
@@ -750,7 +755,12 @@
         <p class="subtitle">Broker-confirmed fills only. Tool-call attempts and unfilled orders are excluded from realized P/L.</p>
         <div class="trade-analytics-card">
           <div class="trade-chart-toolbar">
-            <div class="trade-chart-legend"><span><i class="legend-dot litmus1"></i>Litmus 1</span><span><i class="legend-dot litmus2"></i>Litmus 2</span></div>
+            <div class="trade-chart-controls">
+              <label>Range <select id="trade-range" onchange="updateTradeChart()"><option value="all">Since trading began</option><option value="7d">Past week</option><option value="1d">Last trading day</option></select></label>
+              <label>View <select id="trade-mode" onchange="updateTradeChart()"><option value="timeseries">Time-series</option><option value="cumulative">Cumulative P/L</option></select></label>
+              <label class="trade-account-toggle"><input type="checkbox" value="Litmus1" checked onchange="updateTradeChart()"> Litmus 1</label>
+              <label class="trade-account-toggle"><input type="checkbox" value="Litmus2" checked onchange="updateTradeChart()"> Litmus 2</label>
+            </div>
             <button class="btn sm" onclick="loadVerifiedTrades()">Refresh</button>
           </div>
           <div id="trade-chart-summary" class="trade-chart-summary">Loading verified fills...</div>
@@ -1916,7 +1926,42 @@ function renderTradeChart() {
     svg.appendChild(bar);
   });
 }
+function selectedTradeAccounts() {
+  return new Set([...document.querySelectorAll('.trade-account-toggle input:checked')].map(input => input.value));
+}
+function filteredVerifiedTrades() {
+  const accounts = selectedTradeAccounts();
+  const range = document.getElementById('trade-range')?.value || 'all';
+  const data = verifiedTrades.filter(t => Number.isFinite(Number(t.pnl)) && accounts.has(t.accountName));
+  if (range === 'all' || !data.length) return data;
+  const latest = Math.max(...data.map(t => new Date(t.timestamp || t.exitTime || t.entryTime).getTime()));
+  const cutoff = latest - (range === '7d' ? 7 : 1) * 86400000;
+  return data.filter(t => new Date(t.timestamp || t.exitTime || t.entryTime).getTime() >= cutoff);
+}
+function updateTradeChart() { renderTradeChart(); }
+function renderTradeChart() {
+  const svg = document.getElementById('trade-chart'), empty = document.getElementById('trade-chart-empty');
+  if (!svg) return;
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const data = filteredVerifiedTrades().sort((a,b) => new Date(a.timestamp || a.exitTime || a.entryTime) - new Date(b.timestamp || b.exitTime || b.entryTime));
+  empty.hidden = data.length > 0;
+  if (!data.length) return;
+  const mode = document.getElementById('trade-mode')?.value || 'timeseries';
+  const W=900,H=300,left=72,right=18,top=18,bottom=48,plotW=W-left-right,plotH=H-top-bottom;
+  const selected = selectedTradeAccounts();
+  const values = mode === 'cumulative' ? [...selected].map(a => data.filter(t=>t.accountName===a).reduce((s,t)=>s+Number(t.pnl||0),0)) : data.map(t=>Number(t.pnl));
+  const maxAbs=Math.max(1,...values.map(Math.abs)), zero=top+plotH/2, y=v=>zero-(Number(v)/maxAbs)*(plotH/2-.5), ns='http://www.w3.org/2000/svg';
+  const make=(tag,attrs={})=>{const n=document.createElementNS(ns,tag);Object.entries(attrs).forEach(([k,v])=>n.setAttribute(k,v));return n;};
+  [top,zero,H-bottom].forEach(v=>svg.appendChild(make('line',{x1:left,y1:v,x2:W-right,y2:v,class:'chart-grid'})));
+  const label=(x,y,text,anchor='end')=>{const n=make('text',{x,y,'text-anchor':anchor,class:'chart-label'});n.textContent=text;svg.appendChild(n);};
+  label(left-8,top+4,'+'+fmtPnl(maxAbs)); label(left-8,zero+4,'$0'); label(left-8,H-bottom+4,fmtPnl(-maxAbs)); svg.appendChild(make('line',{x1:left,y1:zero,x2:W-right,y2:zero,class:'chart-axis'}));
+  const color=a=>String(a).toLowerCase().includes('1')?'#4f8cff':'#c084fc';
+  const bar=(value,x,width,account,tip,xText)=>{const yy=value>=0?y(value):zero,h=Math.max(2,Math.abs(y(value)-zero)),n=make('rect',{x,y:yy,width,height:h,rx:2,class:'trade-bar',fill:color(account),tabindex:'0','aria-label':tip}); n.addEventListener('mouseenter',e=>showTradeTooltip(e,tip)); n.addEventListener('focus',e=>showTradeTooltip(e,tip)); n.addEventListener('mouseleave',hideTradeTooltip); n.addEventListener('blur',hideTradeTooltip); svg.appendChild(n); label(Number(x)+Number(width)/2,H-bottom+16,xText,'middle');};
+  if(mode==='cumulative') { const accounts=[...selected].filter(a=>data.some(t=>t.accountName===a)),slot=plotW/Math.max(1,accounts.length),bw=Math.min(130,slot*.62); accounts.forEach((a,i)=>{const v=data.filter(t=>t.accountName===a).reduce((s,t)=>s+Number(t.pnl||0),0);bar(v,left+i*slot+(slot-bw)/2,bw,a,`${a}\nCumulative realized P/L: ${fmtPnl(v)}`,a.replace('Litmus','Litmus '));}); }
+  else {const gap=Math.max(2,Math.min(10,plotW/data.length*.2)),bw=Math.max(4,plotW/data.length-gap),step=plotW/data.length; data.forEach((t,i)=>{const stamp=new Date(t.timestamp||t.exitTime||t.entryTime),v=Number(t.pnl),x=left+i*step+gap/2,xt=stamp.toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});bar(v,x,bw,t.accountName,`${t.accountName||'Unknown account'} / ${t.agentName||'Unassigned'}\n${t.symbol}\n${fmtPnl(v)}\n${stamp.toLocaleString()}`,xt);});}
+}
 function showTradeTooltip(event,text){const tip=document.getElementById('trade-chart-tooltip');if(!tip)return;tip.hidden=false;tip.textContent=text;const r=document.querySelector('.trade-chart-wrap').getBoundingClientRect();tip.style.left=Math.max(4,event.clientX-r.left+8)+'px';tip.style.top=Math.max(4,event.clientY-r.top-70)+'px';}
+
 function hideTradeTooltip(){const tip=document.getElementById('trade-chart-tooltip');if(tip)tip.hidden=true;}
 
 async function loadVerifiedTrades() {
