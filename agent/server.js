@@ -16,7 +16,7 @@ import { AgentHarness, buildSystemPrompt, getOpenCodeEnvCredential, hasOpenCodeC
 import { buildTradeLedger } from './trade-ledger.js';
 import ChatStore from './chat-store.js';
 import AgentOrchestrator from './orchestrator.js';
-import { alpacaTradingUrl, DEFAULT_AGENT_MODEL } from './defaults.js';
+import { alpacaTradingUrl, DEFAULT_AGENT_MODEL, MAX_HEARTBEAT_SECONDS, HEARTBEAT_OVERRIDE_WARMUP_SESSIONS } from './defaults.js';
 import { migrateLegacyDataForAccount } from './data-migration.js';
 import {
   loadConfig, getConfig, saveConfig,
@@ -1195,13 +1195,30 @@ app.put('/api/sandboxes/:id/strategy-rules', async (req, res) => {
 // The agent will see this error and should report it to the operator.
 
 app.post('/api/agent/heartbeat', (req, res) => {
-  const { seconds, reason, sandboxId } = req.body;
-  if (!seconds || seconds < 30 || seconds > 3600) return res.status(400).json({ error: 'seconds must be 30-3600' });
+  const { seconds, reason, sandboxId, force = false } = req.body;
+  if (!Number.isFinite(seconds) || seconds < 30 || seconds > MAX_HEARTBEAT_SECONDS) {
+    return res.status(400).json({ error: `seconds must be 30-${MAX_HEARTBEAT_SECONDS}` });
+  }
   const targetHarness = getHarnessForSandbox(sandboxId);
   if (!targetHarness) return res.status(404).json({ error: 'Sandbox harness not found' });
-  targetHarness.state.heartbeatOverride = { seconds, reason: reason || 'Manual override', oneTime: false };
-  targetHarness.state.emit('heartbeat_change', { seconds, reason: reason || 'Manual override from UI', sandboxId: sandboxId || targetHarness.sandboxId });
-  res.json({ ok: true, seconds });
+  if (!targetHarness.canAgentOverrideHeartbeat(force)) {
+    return res.status(409).json({
+      error: `Settings interval has priority until ${HEARTBEAT_OVERRIDE_WARMUP_SESSIONS} completed market sessions`,
+      completedMarketSessions: targetHarness.getCompletedMarketSessions(),
+      requiredMarketSessions: HEARTBEAT_OVERRIDE_WARMUP_SESSIONS,
+    });
+  }
+  if (force && (!reason || String(reason).trim().length < 12)) {
+    return res.status(400).json({ error: 'A meaningful reason is required for an early heartbeat override' });
+  }
+  targetHarness.state.heartbeatOverride = {
+    seconds, reason: reason || 'Agent override', oneTime: false, forced: Boolean(force),
+  };
+  targetHarness.state.emit('heartbeat_change', {
+    seconds, reason: reason || 'Agent override from UI', forced: Boolean(force),
+    sandboxId: sandboxId || targetHarness.sandboxId,
+  });
+  res.json({ ok: true, seconds, forced: Boolean(force), completedMarketSessions: targetHarness.getCompletedMarketSessions() });
 });
 
 // ── Safe Config (strip secrets) ────────────────────────────────────

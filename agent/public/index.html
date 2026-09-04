@@ -925,12 +925,12 @@
           <p style="font-size:13px;color:var(--ink-muted);margin-bottom:12px">Seconds between agent heartbeats per market phase</p>
           <div class="config-card">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px" id="heartbeat-grid">
-              <div class="form-group"><label>Pre-Market</label><input type="number" id="hb-pre_market" min="30" max="3600" onchange="saveHeartbeat()"></div>
-              <div class="form-group"><label>Market Open</label><input type="number" id="hb-market_open" min="30" max="3600" onchange="saveHeartbeat()"></div>
-              <div class="form-group"><label>Midday</label><input type="number" id="hb-midday" min="30" max="3600" onchange="saveHeartbeat()"></div>
-              <div class="form-group"><label>Market Close</label><input type="number" id="hb-market_close" min="30" max="3600" onchange="saveHeartbeat()"></div>
-              <div class="form-group"><label>After Hours</label><input type="number" id="hb-after_hours" min="60" max="7200" onchange="saveHeartbeat()"></div>
-              <div class="form-group"><label>Closed</label><input type="number" id="hb-closed" min="60" max="7200" onchange="saveHeartbeat()"></div>
+              <div class="form-group"><label>Pre-Market</label><input type="number" id="hb-pre_market" min="30" max="14400" onchange="saveHeartbeat()"></div>
+              <div class="form-group"><label>Market Open</label><input type="number" id="hb-market_open" min="30" max="14400" onchange="saveHeartbeat()"></div>
+              <div class="form-group"><label>Midday</label><input type="number" id="hb-midday" min="30" max="14400" onchange="saveHeartbeat()"></div>
+              <div class="form-group"><label>Market Close</label><input type="number" id="hb-market_close" min="30" max="14400" onchange="saveHeartbeat()"></div>
+              <div class="form-group"><label>After Hours</label><input type="number" id="hb-after_hours" min="60" max="14400" onchange="saveHeartbeat()"></div>
+              <div class="form-group"><label>Closed</label><input type="number" id="hb-closed" min="60" max="14400" onchange="saveHeartbeat()"></div>
             </div>
             <div class="form-hint">Agent can override these dynamically via set_heartbeat tool. Values in seconds.</div>
           </div>
@@ -1123,7 +1123,7 @@
     </div>
     <div class="footer-right">
       <span>Override:</span>
-      <input type="number" id="hb-override" placeholder="sec" min="30" max="3600">
+      <input type="number" id="hb-override" placeholder="sec" min="30" max="14400">
       <button class="btn sm" onclick="overrideHeartbeat()">Set</button>
     </div>
   </div>
@@ -1616,7 +1616,7 @@ function refreshSandboxButtons() {
 }
 async function overrideHeartbeat() {
   const v = parseInt(document.getElementById('hb-override').value);
-  if(!v||v<30||v>3600) return;
+  if(!v||v<30||v>14400) return;
   const sid = getEffectiveSandboxId();
   const body = { seconds: v };
   if (sid) body.sandboxId = sid;
@@ -2064,7 +2064,7 @@ function ensureSandboxTerminal(sandboxId, label) {
             </select>
           </div>
           <div style="margin-top:4px;display:flex;gap:4px">
-            <input type="number" placeholder="sec" min="15" max="7200" style="flex:1;padding:4px;font-size:11px;background:var(--bg-dark);color:var(--text);border:1px solid var(--border);border-radius:3px;width:60px" data-stat="${sandboxId}-hb-override">
+            <input type="number" placeholder="sec" min="15" max="14400" style="flex:1;padding:4px;font-size:11px;background:var(--bg-dark);color:var(--text);border:1px solid var(--border);border-radius:3px;width:60px" data-stat="${sandboxId}-hb-override">
             <button class="btn sm" onclick="overrideHb('${sandboxId}')" style="font-size:10px;padding:3px 8px">Set</button>
           </div>
         </div>
@@ -2366,7 +2366,7 @@ async function overrideHb(sandboxId) {
   const input = document.querySelector(`[data-stat="${sandboxId}-hb-override"]`);
   if (!input) return;
   const v = parseInt(input.value);
-  if (!v || v < 15 || v > 7200) return;
+  if (!v || v < 15 || v > 14400) return;
   input.value = '';
   try {
     await fetch('/api/agent/heartbeat', {

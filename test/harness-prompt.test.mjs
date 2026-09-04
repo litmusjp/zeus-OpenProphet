@@ -1,8 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSystemPrompt, getOpenCodeEnvCredential, hasOpenCodeCredential, tradeEventFromToolUse } from '../agent/harness.js';
+import { AgentHarness, buildSystemPrompt, getOpenCodeEnvCredential, hasOpenCodeCredential, tradeEventFromToolUse } from '../agent/harness.js';
 import { createGoLogLineBuffer, shouldShowGoLogLine } from '../agent/orchestrator.js';
 import { buildTradeLedger } from '../agent/trade-ledger.js';
+
+test('heartbeat overrides wait for two market sessions unless forced', () => {
+  const harness = new AgentHarness({ getCurrentPhaseFn: () => 'closed' });
+  assert.equal(harness.canAgentOverrideHeartbeat(), false);
+  assert.equal(harness.canAgentOverrideHeartbeat(true), true);
+  harness._marketSessionDates.add('2026-09-03');
+  assert.equal(harness.canAgentOverrideHeartbeat(), false);
+  harness._marketSessionDates.add('2026-09-04');
+  assert.equal(harness.canAgentOverrideHeartbeat(), true);
+});
+
+
 
 test('OpenCode authentication accepts a Zen API key without Anthropic credentials', () => {
   assert.equal(hasOpenCodeCredential('', { OPENCODE_API_KEY: 'zen-key' }), true);

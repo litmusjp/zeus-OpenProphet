@@ -4,6 +4,7 @@ import {
   portForAgent, alpacaTradingUrl, resolveAgentModel,
   DEFAULT_AGENT_MODEL, ALPACA_PAPER_TRADING_URL, ALPACA_LIVE_TRADING_URL,
   BEAT_TIMEOUT_MS, SIGKILL_GRACE_MS, DEFAULT_MAX_TOOL_ROUNDS, BEAT_BACKOFF,
+  MAX_HEARTBEAT_SECONDS, HEARTBEAT_OVERRIDE_WARMUP_SESSIONS,
 } from '../agent/defaults.js';
 
 // The ORIGINAL orchestrator.getSandboxPort algorithm, kept here as the oracle so any drift in
@@ -45,5 +46,7 @@ test('operational constants keep their extracted values (regression lock)', () =
   assert.equal(BEAT_TIMEOUT_MS, 300000);
   assert.equal(SIGKILL_GRACE_MS, 5000);
   assert.equal(DEFAULT_MAX_TOOL_ROUNDS, 25);
-  assert.deepEqual(BEAT_BACKOFF, { threshold: 3, factor: 16, capSeconds: 3600 });
+  assert.equal(MAX_HEARTBEAT_SECONDS, 14400);
+  assert.equal(HEARTBEAT_OVERRIDE_WARMUP_SESSIONS, 2);
+  assert.deepEqual(BEAT_BACKOFF, { threshold: 3, factor: 16, capSeconds: 14400 });
 });

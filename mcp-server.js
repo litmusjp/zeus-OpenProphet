@@ -1012,11 +1012,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'set_heartbeat',
-        description: 'Override the agent heartbeat interval. Use this to speed up or slow down your own heartbeat cycle based on market conditions or workload. For example, set to 60s during volatile markets or 600s when nothing is happening.',
+        description: 'Override the agent heartbeat interval after the initial Settings-controlled warm-up. Settings remain priority for the first two completed market sessions. Use force=true only for an urgent, strongly justified market condition.',
         inputSchema: {
           type: 'object',
           properties: {
-            seconds: { type: 'number', description: 'New heartbeat interval in seconds (30-3600)' },
+            seconds: { type: 'number', description: 'New heartbeat interval in seconds (30-14400; maximum 4 hours)' },
+            force: { type: 'boolean', description: 'Allow an early override before two completed market sessions; requires a meaningful urgent reason' },
             reason: { type: 'string', description: 'Reason for the override (logged to terminal)' },
           },
           required: ['seconds'],
@@ -2153,9 +2154,10 @@ Worst Trade: ${stats.worst_result_pct.toFixed(1)}% ($${stats.worst_result_dollar
       }
 
       case 'set_heartbeat': {
-        const seconds = Math.min(Math.max(args.seconds, 30), 3600);
+        const seconds = Math.min(Math.max(Number(args.seconds), 30), 14400);
         await agentAxios.post(`${AGENT_URL}/api/agent/heartbeat`, {
           seconds,
+          force: Boolean(args.force),
           sandboxId: OPENPROPHET_SANDBOX_ID,
           reason: args.reason || `Agent override to ${seconds}s`,
         });

@@ -5,7 +5,7 @@ import { EventEmitter } from 'events';
 import fs from 'fs/promises';
 import path from 'path';
 import { renderToolMenu } from './tool-catalog.js';
-import { DEFAULT_AGENT_MODEL, DEFAULT_MAX_TOOL_ROUNDS, BEAT_TIMEOUT_MS, SIGKILL_GRACE_MS, BEAT_BACKOFF } from './defaults.js';
+import { DEFAULT_AGENT_MODEL, DEFAULT_MAX_TOOL_ROUNDS, BEAT_TIMEOUT_MS, SIGKILL_GRACE_MS, BEAT_BACKOFF, MAX_HEARTBEAT_SECONDS, HEARTBEAT_OVERRIDE_WARMUP_SESSIONS } from './defaults.js';
 
 // Default max tool rounds; overridden by permissions config at runtime
 
@@ -119,7 +119,7 @@ Each time you wake, work this loop in order and stop once you've acted or confir
 - Midday (10:30–3): manage positions, tighten stops, avoid low-conviction churn.
 - Market close (3–4): decide what to hold overnight vs. flatten, and act before the bell.
 - After hours (4–8) / Closed: review, log, and plan. No impulsive after-hours trades.
-Tune cadence with apply_heartbeat_profile ("active" | "passive" | "long_horizon" | "earnings_season" | "overnight" | "scalp") or set_heartbeat (seconds) — speed up when volatile, slow down when quiet.
+Tune cadence with apply_heartbeat_profile ("active" | "passive" | "long_horizon" | "earnings_season" | "overnight" | "scalp") or set_heartbeat (seconds). The Settings interval has priority during your first two completed market sessions; after that, use set_heartbeat when evidence supports a change. Use force=true only for an urgent, strongly justified market condition and explain why.
 
 ## Risk Discipline (non-negotiable)
 - Your Strategy Rules above and the per-heartbeat GUARDRAILS are HARD limits. Never work around them.
@@ -266,6 +266,7 @@ export class AgentHarness {
     this._beatTimeout = null;
     this._sessionEpoch = 0;
     this._consecutiveErrors = 0;
+    this._marketSessionDates = new Set();
   }
 
   _resolveSandbox() {
@@ -583,6 +584,20 @@ ${userBlock}`;
     this._beating = false;
   }
 
+  _noteMarketSession(phase) {
+    if (phase !== 'market_close') return;
+    const date = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    this._marketSessionDates.add(date);
+  }
+
+  getCompletedMarketSessions() {
+    return this._marketSessionDates.size;
+  }
+
+  canAgentOverrideHeartbeat(force = false) {
+    return Boolean(force) || this.getCompletedMarketSessions() >= HEARTBEAT_OVERRIDE_WARMUP_SESSIONS;
+  }
+
   _getHeartbeatSeconds() {
     const base = this._baseHeartbeatSeconds();
     // Exponential backoff after repeated beat failures: slow the loop so a broken
@@ -639,6 +654,7 @@ ${userBlock}`;
     this.state.lastBeatTime = new Date().toISOString();
     const phase = this.getCurrentPhaseFn();
     this.state.phase = phase;
+    this._noteMarketSession(phase);
     const model = this.state.activeModel;
 
     this.state.emit('beat_start', { beat: beatNum, phase, time: this.state.lastBeatTime });
