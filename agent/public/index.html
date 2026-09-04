@@ -1861,7 +1861,7 @@ function clearTradeFeed() {
 
 function renderVerifiedTradeFeed() {
   const feed = clearTradeFeed();
-  const filled = verifiedOrders.filter(o => ['filled','partially_filled','partially-filled'].includes(String(o.Status || o.status || '').toLowerCase()));
+  const filled = verifiedOrders.filter(o => !['submit_failed','canceled','cancelled','rejected','expired'].includes(String(o.Status || o.status || '').toLowerCase()));
   if (!filled.length) {
     feed.innerHTML = '<div class="no-data">No broker-confirmed fills yet.</div>';
     return;
