@@ -1519,7 +1519,38 @@ app.post('/api/plugins/slack/test', async (req, res) => {
 });
 
 // ── Verified trade ledger ─────────────────────────────────────────
-app.get('/api/trades', (req, res) => {
+async function reconcileSandboxOrders(sandbox) {
+  const localOrders = getPersistedSandboxOrders(sandbox);
+  try {
+    const activeAccount = getActiveAccount();
+    const isPrimary = activeAccount?.id === sandbox.accountId;
+    if (isPrimary) {
+      if (!goReady) await startGoBackend(activeAccount);
+    } else {
+      const runtime = orchestrator.getSandboxRuntime(sandbox.id);
+      if (!runtime?.goReady) await orchestrator.startGoBackend(sandbox.id);
+    }
+    const client = getGoClientForSandbox(sandbox.id);
+    if (!client) return localOrders;
+    const { data } = await client.get('/api/v1/orders', { params: { status: 'all' } });
+    const brokerOrders = Array.isArray(data) ? data : [];
+    const merged = new Map();
+    for (const order of localOrders) {
+      const key = order.ID || order.ClientOrderID || `${order.Symbol}:${order.SubmittedAt}`;
+      merged.set(key, order);
+    }
+    for (const order of brokerOrders) {
+      const key = order.ID || order.ClientOrderID || `${order.Symbol}:${order.SubmittedAt}`;
+      merged.set(key, { ...(merged.get(key) || {}), ...order });
+    }
+    return [...merged.values()].sort((a, b) => String(a.SubmittedAt || '').localeCompare(String(b.SubmittedAt || '')));
+  } catch (err) {
+    console.warn(`[trades] Alpaca reconciliation failed for ${sandbox.id}: ${err.message}`);
+    return localOrders;
+  }
+}
+
+app.get('/api/trades', async (req, res) => {
   try {
     const config = getConfig();
     const requested = req.query.sandboxId;
@@ -1537,7 +1568,7 @@ app.get('/api/trades', (req, res) => {
         agentName: getResolvedAgentForSandbox(sandbox.id)?.name || 'Unassigned',
         sandboxId: sandbox.id,
       };
-      const sandboxOrders = getPersistedSandboxOrders(sandbox);
+      const sandboxOrders = await reconcileSandboxOrders(sandbox);
       orders.push(...sandboxOrders.map(order => ({ ...order, ...metadata })));
       trades.push(...buildTradeLedger(sandboxOrders, metadata));
     }
