@@ -2131,8 +2131,25 @@ function renderSandboxTabs() {
   }
 }
 
+function refreshManagerModelSelectors() {
+  const providerSel = document.getElementById('mgr-provider');
+  const modelSel = document.getElementById('mgr-model');
+  if (!providerSel || !modelSel) return;
+  const models = config.models || [];
+  const mgr = config.manager || {};
+  const currentModel = mgr.model || config.activeModel || 'anthropic/claude-sonnet-4-6';
+  const currentProvider = currentModel.split('/')[0];
+  const providers = [...new Set(models.map(m => m.id.split('/')[0]))].sort();
+  providerSel.innerHTML = providers.map(p => '<option value="' + esc(p) + '"' + (p === currentProvider ? ' selected' : '') + '>' + esc(p) + '</option>').join('');
+  const provider = providerSel.value || currentProvider;
+  modelSel.innerHTML = models.filter(m => m.id.startsWith(provider + '/')).map(m => '<option value="' + esc(m.id) + '"' + (m.id === currentModel ? ' selected' : '') + '>' + esc(m.name) + '</option>').join('');
+}
+
 function ensureManagerTerminal() {
-  if (sandboxTerminals['_manager']) return;
+  if (sandboxTerminals['_manager']) {
+    refreshManagerModelSelectors();
+    return;
+  }
   const container = document.getElementById('sandbox-terminals');
   const wrapper = document.createElement('div');
   wrapper.id = 'term-wrap-_manager';
