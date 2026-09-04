@@ -1643,16 +1643,26 @@ async function loadHistoryPanel() {
 }
 
 async function openChatSession(sessionId, accountId) {
+  const transcript = document.getElementById('history-transcript');
+  const title = document.getElementById('history-session-title');
+  if (transcript) transcript.innerHTML = '<div class="log-entry info"><span class="time">--:--:--</span>Loading session transcript...</div>';
+  if (title) title.textContent = 'Loading transcript...';
   try {
+    const sessionMeta = historyState.chatSessions.find(s => s.id === sessionId);
+    accountId = accountId || sessionMeta?.accountId || sessionMeta?.metadata?.accountId;
+    if (!accountId) throw new Error('This session has no account identifier');
     const r = await fetch('/api/chats/' + encodeURIComponent(sessionId) + '?accountId=' + encodeURIComponent(accountId));
     const data = await r.json();
-    if (data.error) throw new Error(data.error);
+    if (!r.ok || data.error) throw new Error(data.error || 'HTTP ' + r.status);
     historyState.selectedChatId = sessionId;
     historyState.chatMessages = data.messages || [];
     renderHistorySessions();
     renderHistoryTranscript(data.session, data.messages || []);
+    document.getElementById('history-transcript')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (e) {
-    log('Chat load failed: ' + e.message, 'error');
+    if (title) title.textContent = 'Transcript unavailable';
+    if (transcript) transcript.innerHTML = '<div class="log-entry error"><span class="time">--:--:--</span>' + esc('Chat load failed: ' + e.message) + '</div>';
+    if (typeof showToast === 'function') showToast('Chat load failed: ' + e.message, 'error');
   }
 }
 
@@ -1689,7 +1699,7 @@ function renderHistorySessions() {
     const selected = s.id === historyState.selectedChatId;
     const when = s.lastActiveAt ? new Date(s.lastActiveAt).toLocaleString() : '--';
     const agentName = s.metadata?.agentName || s.metadata?.agentId || '--';
-    return '<div class="config-card' + (selected ? ' active-card' : '') + '"><div class="config-card-header"><span class="config-card-title">' + esc(agentName) + '</span><span class="badge paper">' + esc(s.accountId || '--') + '</span></div><div class="config-card-meta">Session: ' + esc(s.id) + '</div><div class="config-card-desc">' + esc(s.lastMessage || 'No preview available') + '</div><div class="config-card-meta">Messages: ' + esc(String(s.messageCount || 0)) + ' | Last active: ' + esc(when) + '</div><div class="config-card-actions"><button class="btn sm" onclick="openChatSession(\'' + s.id + '\', \'' + s.accountId + '\')">Open</button></div></div>';
+    return '<div class="config-card' + (selected ? ' active-card' : '') + '"><div class="config-card-header"><span class="config-card-title">' + esc(agentName) + '</span><span class="badge paper">' + esc(s.accountId || '--') + '</span></div><div class="config-card-meta">Session: ' + esc(s.id) + '</div><div class="config-card-desc">' + esc(s.lastMessage || 'No preview available') + '</div><div class="config-card-meta">Messages: ' + esc(String(s.messageCount || 0)) + ' | Last active: ' + esc(when) + '</div><div class="config-card-actions"><button class="btn sm" onclick="openChatSession(\'' + s.id + '\', \'' + s.accountId + '\'); return false;">Open</button></div></div>';
   }).join('');
 }
 
