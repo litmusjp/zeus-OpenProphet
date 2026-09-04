@@ -1698,8 +1698,10 @@ function renderHistorySessions() {
   el.innerHTML = historyState.chatSessions.map(s => {
     const selected = s.id === historyState.selectedChatId;
     const when = s.lastActiveAt ? new Date(s.lastActiveAt).toLocaleString() : '--';
-    const agentName = s.metadata?.agentName || s.metadata?.agentId || '--';
-    return '<div class="config-card' + (selected ? ' active-card' : '') + '"><div class="config-card-header"><span class="config-card-title">' + esc(agentName) + '</span><span class="badge paper">' + esc(s.accountId || '--') + '</span></div><div class="config-card-meta">Session: ' + esc(s.id) + '</div><div class="config-card-desc">' + esc(s.lastMessage || 'No preview available') + '</div><div class="config-card-meta">Messages: ' + esc(String(s.messageCount || 0)) + ' | Last active: ' + esc(when) + '</div><div class="config-card-actions"><button class="btn sm" onclick="openChatSession(\'' + s.id + '\', \'' + s.accountId + '\'); return false;">Open</button></div></div>';
+    const agentName = s.metadata?.agentName || s.metadata?.agentId || (s.metadata?.mode === 'manager' ? 'Manager' : '--');
+    const accountName = s.accountName || s.metadata?.accountName || s.accountId || '--';
+    const sandboxName = s.sandboxName || s.metadata?.sandboxName || s.metadata?.sandboxId || '--';
+    return '<div class="config-card' + (selected ? ' active-card' : '') + '"><div class="config-card-header"><span class="config-card-title">' + esc(agentName) + '</span><span class="badge paper">' + esc(accountName) + '</span></div><div class="config-card-meta">Sandbox: ' + esc(sandboxName) + ' | Session: ' + esc(s.id) + '</div><div class="config-card-desc">' + esc(s.lastMessage || 'No preview available') + '</div><div class="config-card-meta">Messages: ' + esc(String(s.messageCount || 0)) + ' | Last active: ' + esc(when) + '</div><div class="config-card-actions"><button class="btn sm" onclick="openChatSession(\'' + s.id + '\', \'' + s.accountId + '\'); return false;">Open</button></div></div>';
   }).join('');
 }
 

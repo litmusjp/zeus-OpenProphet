@@ -601,7 +601,19 @@ app.post('/api/agent/resume', (req, res) => {
 // ── Manager Chat ───────────────────────────────────────────────────
 let _managerSessionId = null;
 let _managerProc = null;
-const _managerSessions = []; // { id, startTime, messageCount }
+let _managerCurrentUserMessage = '';
+let _managerCurrentText = '';
+const MANAGER_HISTORY_ACCOUNT = '__manager__';
+const _managerSessions = []; // runtime cache; durable records live in ChatStore
+
+async function getManagerContext() {
+  const sessions = await chatStore.getRecentContext(MANAGER_HISTORY_ACCOUNT, {
+    sessionLimit: 6, messagesPerSession: 8, charLimit: 12000,
+  });
+  return sessions.length
+    ? `\n\n## Prior Manager Sessions (persisted)\nUse these as continuity context. Re-check current configuration with tools before acting.\n${JSON.stringify(sessions)}\n## End Prior Manager Sessions\n`
+    : '';
+}
 
 app.get('/api/manager/config', (req, res) => {
   const config = getConfig();
@@ -665,6 +677,7 @@ You help the user:
 
 **Configuration** (your primary tools):
 - list_sandboxes: List every OpenProphet sandbox/account, exact sandbox ID, account name, assigned agent, model, and runtime status. Always call this when the user asks about accounts or sandboxes.
+- get_session_context: Retrieve compact prior Manager session context for continuity; verify current state with tools.
 - create_agent: Create a new agent with name, description, model, and optional custom identity prompt
 - create_strategy: Create a new strategy with name, description, and trading rules (markdown)
 - assign_agent_to_sandbox: Assign an agent to an account to activate it
@@ -712,9 +725,12 @@ ${message.trim()}${customPromptAddition}`;
     if (_managerSessionId) args.push('--session', _managerSessionId);
 
     const isNewSession = !_managerSessionId;
-    const fullPrompt = isNewSession 
-      ? managerPrompt
+    const priorManagerContext = isNewSession ? await getManagerContext() : '';
+    const fullPrompt = isNewSession
+      ? managerPrompt + priorManagerContext
       : `[Manager] User message:\n${message.trim()}`;
+    _managerCurrentUserMessage = message.trim();
+    _managerCurrentText = '';
     
     // Track session
     if (isNewSession) {
@@ -729,7 +745,7 @@ ${message.trim()}${customPromptAddition}`;
 
     const proc = spawn('opencode', args, {
       cwd: process.cwd(),
-      env: { ...process.env },
+      env: { ...process.env, OPENPROPHET_ROLE: 'manager' },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     _managerProc = proc;
@@ -753,7 +769,10 @@ ${message.trim()}${customPromptAddition}`;
           
           if (evt.type === 'text') {
             const text = part.text || evt.text || '';
-            if (text) broadcast('manager_text', { text });
+            if (text) {
+              _managerCurrentText += text;
+              broadcast('manager_text', { text });
+            }
           } else if (evt.type === 'tool_call') {
             const name = part.name || part.tool || evt.name || '?';
             const args = part.args || part.input || {};
@@ -773,8 +792,22 @@ ${message.trim()}${customPromptAddition}`;
     });
 
     proc.stderr.on('data', () => {});
-    proc.on('close', () => {
+    proc.on('close', async () => {
       if (_managerProc === proc) _managerProc = null;
+      // Persist Manager sessions outside process memory so restarts retain context.
+      if (_managerSessionId) {
+        await chatStore.startSession(MANAGER_HISTORY_ACCOUNT, _managerSessionId, {
+          mode: 'manager', agentId: 'manager', agentName: 'Manager',
+          accountId: MANAGER_HISTORY_ACCOUNT, accountName: 'Manager',
+          sandboxId: null, sandboxName: 'Manager', model: ocModel,
+        });
+        await chatStore.addMessage(MANAGER_HISTORY_ACCOUNT, _managerSessionId, {
+          role: 'user', kind: 'manager_message', content: _managerCurrentUserMessage,
+        });
+        await chatStore.addMessage(MANAGER_HISTORY_ACCOUNT, _managerSessionId, {
+          role: 'assistant', kind: 'manager_response', content: _managerCurrentText,
+        });
+      }
       // Update session tracking
       const last = _managerSessions[_managerSessions.length - 1];
       if (last && !last.id && _managerSessionId) last.id = _managerSessionId;
@@ -1227,7 +1260,35 @@ app.get('/api/chats/all', async (req, res) => {
   try {
     const limit = Number(req.query.limit || 100);
     const sessions = await chatStore.listAllSessions(limit);
-    res.json({ sessions });
+    const decorated = sessions.map(session => {
+      const meta = session.metadata || {};
+      const account = meta.accountId ? getAccountById(meta.accountId) : null;
+      const sandbox = meta.sandboxId ? getSandbox(meta.sandboxId) : null;
+      return {
+        ...session,
+        metadata: {
+          ...meta,
+          accountName: meta.accountName || account?.name || (meta.mode === 'manager' ? 'Manager' : session.accountId),
+          sandboxName: meta.sandboxName || sandbox?.name || (meta.mode === 'manager' ? 'Manager' : meta.sandboxId),
+        },
+        accountName: meta.accountName || account?.name || (meta.mode === 'manager' ? 'Manager' : session.accountId),
+        sandboxName: meta.sandboxName || sandbox?.name || (meta.mode === 'manager' ? 'Manager' : meta.sandboxId),
+      };
+    });
+    res.json({ sessions: decorated });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/chats/context', async (req, res) => {
+  try {
+    const accountId = req.query.accountId || getActiveAccount()?.id;
+    if (!accountId) return res.status(400).json({ error: 'No account identifier' });
+    const context = await chatStore.getRecentContext(accountId, {
+      sessionLimit: Math.min(Number(req.query.sessions || 5), 20),
+      messagesPerSession: Math.min(Number(req.query.messages || 8), 20),
+      charLimit: Math.min(Number(req.query.chars || 12000), 30000),
+    });
+    res.json({ accountId, context });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

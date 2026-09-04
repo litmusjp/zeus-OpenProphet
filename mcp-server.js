@@ -19,6 +19,8 @@ const TRADING_BOT_URL = process.env.TRADING_BOT_URL || 'http://127.0.0.1:4534';
 const TRADING_BOT_TOKEN = process.env.TRADING_BOT_TOKEN || '';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const OPENPROPHET_ACCOUNT_ID = process.env.OPENPROPHET_ACCOUNT_ID || 'default';
+const OPENPROPHET_ROLE = process.env.OPENPROPHET_ROLE || 'agent';
+const SESSION_CONTEXT_ACCOUNT_ID = OPENPROPHET_ROLE === 'manager' ? '__manager__' : OPENPROPHET_ACCOUNT_ID;
 const OPENPROPHET_SANDBOX_ID = process.env.OPENPROPHET_SANDBOX_ID || `sbx_${OPENPROPHET_ACCOUNT_ID}`;
 const SANDBOX_DATA_DIR = path.join(process.cwd(), 'data', 'sandboxes', OPENPROPHET_ACCOUNT_ID);
 const SUMMARIES_DIR = path.join(SANDBOX_DATA_DIR, 'news_summaries');
@@ -1109,6 +1111,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: 'get_session_context',
+        description: 'Retrieve compact prior chat, strategy, decision, and tool-event context for the current account. Use for continuity and learning; verify live state before trading.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sessions: { type: 'number', description: 'Number of recent sessions (default 5, max 20)' },
+            messages: { type: 'number', description: 'Messages per session (default 8, max 20)' },
+          },
+        },
+      },
+      {
         name: 'create_agent',
         description: 'Create a new agent persona. The agent will appear in the UI and can be assigned to any sandbox/account. Returns the new agent ID.',
         inputSchema: {
@@ -2077,6 +2090,16 @@ Worst Trade: ${stats.worst_result_pct.toFixed(1)}% ($${stats.worst_result_dollar
         return {
           content: [{ type: 'text', text: `Created new strategy "${strategyName}" (ID: ${newStrategy.id}) and assigned to agent "${agentId3}". Visible on Agents page. Existing strategies not modified.` }],
         };
+      }
+
+      case 'get_session_context': {
+        const params = new URLSearchParams({
+          accountId: SESSION_CONTEXT_ACCOUNT_ID,
+          sessions: String(args?.sessions || 5),
+          messages: String(args?.messages || 8),
+        });
+        const resp = await agentAxios.get(`${AGENT_URL}/api/chats/context?${params.toString()}`, { timeout: 5000 });
+        return { content: [{ type: 'text', text: JSON.stringify(resp.data?.context || [], null, 2) }] };
       }
 
       case 'list_sandboxes': {

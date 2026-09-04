@@ -10,7 +10,7 @@ export const TOOL_CATALOG = {
   'Intelligence': ['aggregate_and_summarize_news', 'list_news_summaries', 'get_news_summary'],
   'Agent Config': ['list_sandboxes', 'update_agent_prompt', 'update_strategy_rules', 'get_agent_config', 'set_heartbeat', 'update_permissions', 'set_session_mode', 'create_agent', 'create_strategy', 'assign_agent_to_sandbox'],
   'Heartbeat': ['get_heartbeat_profiles', 'apply_heartbeat_profile', 'get_heartbeat_phases', 'update_heartbeat_phase'],
-  'Logging': ['log_decision', 'log_activity', 'get_activity_log'],
+  'Logging': ['log_decision', 'log_activity', 'get_activity_log', 'get_session_context'],
   'Trade History': ['find_similar_setups', 'store_trade_setup', 'get_trade_stats'],
   'Utility': ['get_datetime', 'wait'],
 };

@@ -292,9 +292,13 @@ export class AgentHarness {
 
   async _persistSession(sessionId, metadata = {}) {
     if (!this.chatStore || !sessionId || !this.state.activeAccountId) return;
+    const sandbox = this._resolveSandbox();
+    const account = this._resolveAccount();
     await this.chatStore.startSession(this.state.activeAccountId, sessionId, {
       sandboxId: this.sandboxId,
+      sandboxName: sandbox?.name || this.sandboxId,
       accountId: this.state.activeAccountId,
+      accountName: account?.name || this.state.activeAccountId,
       agentId: this.state.activeAgentId,
       agentName: this._agentConfig?.name,
       model: this.state.activeModel,
@@ -302,10 +306,19 @@ export class AgentHarness {
     });
   }
 
+  async _priorContext() {
+    if (!this.chatStore || !this.state.activeAccountId) return '';
+    const sessions = await this.chatStore.getRecentContext(this.state.activeAccountId, {
+      sessionLimit: 4, messagesPerSession: 8, charLimit: 10000,
+    });
+    if (!sessions.length) return '';
+    return `\n\n## Prior Session Context (persisted)\nThese are compact excerpts from earlier sessions for this same account. Use them for continuity, but verify current prices, positions, and order status with live tools. Do not repeat old orders merely because they appear here.\n${JSON.stringify(sessions)}\n## End Prior Session Context\n`;
+  }
+
   async _persistMessages(sessionId, messages = []) {
     if (!this.chatStore || !sessionId || !this.state.activeAccountId) return;
     for (const message of messages) {
-      if (!message?.content?.trim()) continue;
+    if (!message || (!message?.content?.trim() && !message?.eventType && !message?.kind)) continue;
       await this.chatStore.addMessage(this.state.activeAccountId, sessionId, message);
     }
   }
@@ -558,6 +571,7 @@ ${userBlock}`;
       await this._persistMessages(effectiveSessionId, [
         ...allMessages.map(content => ({ role: 'user', kind: 'message', beat: beatNum, content })),
         { role: 'assistant', kind: 'message', beat: beatNum, toolCalls: result.toolCalls || 0, content: result.text || '' },
+        ...(result.toolEvents || []),
       ]);
     } catch (err) {
       this.state.stats.errors++;
@@ -664,6 +678,7 @@ ${userBlock}`;
       await this._persistSession(effectiveSessionId, { mode: 'heartbeat' });
       await this._persistMessages(effectiveSessionId, [
         { role: 'assistant', kind: 'heartbeat', beat: beatNum, phase, toolCalls: result.toolCalls || 0, content: result.text || '' },
+        ...(result.toolEvents || []),
       ]);
 
       this._consecutiveErrors = 0; // clean beat clears any backoff
@@ -692,7 +707,10 @@ ${userBlock}`;
   /**
    * Run opencode as subprocess with MCP tools and stream JSON events
    */
-  _runClaude(prompt, model) {
+  async _runClaude(prompt, model) {
+    const isNewSession = !this._sessionId;
+    let priorContext = '';
+    if (isNewSession) priorContext = await this._priorContext();
     return new Promise((resolve, reject) => {
       const sessionEpoch = this._sessionEpoch;
       // OpenCode model format: anthropic/claude-sonnet-4-6
@@ -713,11 +731,10 @@ ${userBlock}`;
         args.push('--session', this._sessionId);
       }
 
-      // Only include system prompt on first beat (new session) — subsequent beats
-      // on the same session already have it in context, saving ~2000 tokens/beat
-      const isNewSession = !this._sessionId;
+      // Only include system prompt on first beat (new session) and rehydrate a
+      // compact, account-scoped context window after process restarts.
       const fullPrompt = isNewSession
-        ? `[SYSTEM INSTRUCTIONS - Follow these at all times]\n${this.systemPrompt}\n\n[END SYSTEM INSTRUCTIONS]\n\n${prompt}`
+        ? `[SYSTEM INSTRUCTIONS - Follow these at all times]\n${this.systemPrompt}\n\n[END SYSTEM INSTRUCTIONS]\n${priorContext}\n${prompt}`
         : prompt;
 
       if (!this._isMessageBeat) {
@@ -752,6 +769,7 @@ ${userBlock}`;
       let fullText = '';
       let toolCalls = 0;
       let sessionId = null;
+      const toolEvents = [];
       let buffer = '';
       let totalCost = 0;
       let totalTokens = 0;
@@ -767,6 +785,7 @@ ${userBlock}`;
             const event = JSON.parse(line);
             this._handleOpenCodeEvent(event, {
               addToolCall: () => toolCalls++,
+              recordToolEvent: (event) => toolEvents.push(event),
               addText: (t) => { fullText += t; },
               setSession: (id) => { sessionId = id; },
               addCost: (c) => { totalCost += c; },
@@ -798,6 +817,7 @@ ${userBlock}`;
             const event = JSON.parse(buffer);
             this._handleOpenCodeEvent(event, {
               addToolCall: () => toolCalls++,
+              recordToolEvent: (event) => toolEvents.push(event),
               addText: (t) => { fullText += t; },
               setSession: (id) => { sessionId = id; },
               addCost: (c) => { totalCost += c; },
@@ -819,7 +839,7 @@ ${userBlock}`;
             message: `Beat interrupted by user (collected ${fullText.length} chars, ${toolCalls} tools before interrupt)`,
             level: 'warning',
           });
-          resolve({ text: fullText, toolCalls, sessionId, interrupted: true, sessionEpoch });
+          resolve({ text: fullText, toolCalls, toolEvents, sessionId, interrupted: true, sessionEpoch });
           return;
         }
 
@@ -829,11 +849,11 @@ ${userBlock}`;
         });
 
         if (code !== 0 && code !== null && !fullText) {
-          resolve({ error: `opencode exited with code ${code} signal ${signal}`, text: fullText, toolCalls, sessionId, sessionEpoch });
+          resolve({ error: `opencode exited with code ${code} signal ${signal}`, text: fullText, toolCalls, toolEvents, sessionId, sessionEpoch });
         } else if (signal && !fullText) {
-          resolve({ error: `opencode killed by ${signal}`, text: fullText, toolCalls, sessionId, sessionEpoch });
+          resolve({ error: `opencode killed by ${signal}`, text: fullText, toolCalls, toolEvents, sessionId, sessionEpoch });
         } else {
-          resolve({ text: fullText, toolCalls, sessionId, sessionEpoch });
+          resolve({ text: fullText, toolCalls, toolEvents, sessionId, sessionEpoch });
         }
       });
 
@@ -894,6 +914,10 @@ ${userBlock}`;
 
         // Emit tool result
         const resultStr = typeof toolOutput === 'string' ? toolOutput : JSON.stringify(toolOutput);
+        ctx.recordToolEvent?.({
+          eventType: 'tool_call', kind: 'tool_call', role: 'assistant',
+          tool: toolName, args: toolInput, result: resultStr?.substring(0, 1200), beat: beatNum,
+        });
         this.state.emit('tool_result', { name: toolName, result: resultStr.substring(0, 500), beat: beatNum });
 
         // Track only tools that execute trades. Read-only tools such as
