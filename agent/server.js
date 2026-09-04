@@ -11,7 +11,9 @@ import { fileURLToPath } from 'url';
 import { spawn, execSync } from 'child_process';
 import { randomBytes } from 'crypto';
 import axios from 'axios';
+import Database from 'better-sqlite3';
 import { AgentHarness, buildSystemPrompt, getOpenCodeEnvCredential, hasOpenCodeCredential } from './harness.js';
+import { buildTradeLedger } from './trade-ledger.js';
 import ChatStore from './chat-store.js';
 import AgentOrchestrator from './orchestrator.js';
 import { alpacaTradingUrl, DEFAULT_AGENT_MODEL } from './defaults.js';
@@ -51,6 +53,26 @@ const TRADING_BOT_TOKEN = process.env.TRADING_BOT_TOKEN || '';
 
 function getSandboxDbPathForAccount(accountId) {
   return path.join(PROJECT_ROOT, 'data', 'sandboxes', accountId, 'prophet_trader.db');
+}
+
+function getPersistedSandboxOrders(sandbox) {
+  const dbPath = getSandboxDbPathForAccount(sandbox.accountId);
+  if (!existsSync(dbPath)) return [];
+  let db;
+  try {
+    db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    return db.prepare(`
+      SELECT order_id AS ID, symbol AS Symbol, qty AS Qty, side AS Side, type AS Type,
+             status AS Status, filled_qty AS FilledQty, filled_avg_price AS FilledAvgPrice,
+             submitted_at AS SubmittedAt, filled_at AS FilledAt
+      FROM orders ORDER BY submitted_at ASC
+    `).all();
+  } catch (err) {
+    console.warn(`[trades] Could not read ${sandbox.id} order ledger: ${err.message}`);
+    return [];
+  } finally {
+    try { db?.close(); } catch {}
+  }
 }
 
 // Pooled HTTP agent for Go backend calls — reuses TCP connections
@@ -1494,6 +1516,35 @@ app.post('/api/plugins/slack/test', async (req, res) => {
     }, { timeout: 5000 });
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: 'Failed to send test message: ' + err.message }); }
+});
+
+// ── Verified trade ledger ─────────────────────────────────────────
+app.get('/api/trades', (req, res) => {
+  try {
+    const config = getConfig();
+    const requested = req.query.sandboxId;
+    const sandboxes = Object.values(config.sandboxes || {})
+      .filter(sandbox => !requested || sandbox.id === requested);
+    const orders = [];
+    const trades = [];
+    for (const sandbox of sandboxes) {
+      const account = getAccountById(sandbox.accountId);
+      if (!account) continue;
+      const metadata = {
+        accountId: account.id,
+        accountName: account.name,
+        agentId: getResolvedAgentForSandbox(sandbox.id)?.id || sandbox.agentId || null,
+        agentName: getResolvedAgentForSandbox(sandbox.id)?.name || 'Unassigned',
+        sandboxId: sandbox.id,
+      };
+      const sandboxOrders = getPersistedSandboxOrders(sandbox);
+      orders.push(...sandboxOrders.map(order => ({ ...order, ...metadata })));
+      trades.push(...buildTradeLedger(sandboxOrders, metadata));
+    }
+    res.json({ generatedAt: new Date().toISOString(), orders, trades });
+  } catch (err) {
+    res.status(500).json({ error: `Could not load verified trades: ${err.message}` });
+  }
 });
 
 // ── Portfolio Proxy ────────────────────────────────────────────────

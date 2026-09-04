@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildSystemPrompt, getOpenCodeEnvCredential, hasOpenCodeCredential, tradeEventFromToolUse } from '../agent/harness.js';
 import { createGoLogLineBuffer, shouldShowGoLogLine } from '../agent/orchestrator.js';
+import { buildTradeLedger } from '../agent/trade-ledger.js';
 
 test('OpenCode authentication accepts a Zen API key without Anthropic credentials', () => {
   assert.equal(hasOpenCodeCredential('', { OPENCODE_API_KEY: 'zen-key' }), true);
@@ -77,6 +78,21 @@ test('tradeEventFromToolUse recognizes every order execution tool', () => {
     assert.equal(event?.tool, tool, tool);
     assert.equal(event?.side, side, `${tool} side`);
   }
+});
+
+test('trade ledger pairs filled orders and calculates realized stock and option P/L', () => {
+  const trades = buildTradeLedger([
+    { ID: 'b1', Symbol: 'AAPL', Side: 'buy', FilledQty: 2, FilledAvgPrice: 100, Status: 'filled', FilledAt: '2026-01-01T10:00:00Z' },
+    { ID: 's1', Symbol: 'AAPL', Side: 'sell', FilledQty: 2, FilledAvgPrice: 105, Status: 'filled', FilledAt: '2026-01-01T11:00:00Z' },
+    { ID: 'b2', Symbol: 'AAPL260116C00100000', Side: 'buy', FilledQty: 1, FilledAvgPrice: 2, Status: 'filled', FilledAt: '2026-01-01T12:00:00Z' },
+    { ID: 's2', Symbol: 'AAPL260116C00100000', FilledQty: 1, Side: 'sell', FilledAvgPrice: 2.5, Status: 'filled', FilledAt: '2026-01-01T13:00:00Z' },
+  ], { accountId: 'a1', accountName: 'Litmus 1', agentName: 'Ling' });
+  assert.equal(trades.length, 2);
+  assert.equal(trades[0].pnl, 50);
+  assert.equal(trades[1].pnl, 10);
+  assert.equal(trades[0].accountName, 'Litmus 1');
+  assert.equal(trades[0].agentName, 'Ling');
+  assert.equal(trades[0].assetType, 'option');
 });
 
 test('default system prompt carries the mandate, decision loop, risk discipline, and learning loop', async () => {

@@ -446,6 +446,22 @@
     .trade-card .trade-side.sell { color: var(--error); }
     .trade-card .trade-details { font-size: 12px; color: var(--ink-muted); margin-top: 4px; }
     .trade-card .trade-time { font-size: 11px; color: var(--ink-faint); font-family: 'IBM Plex Mono', monospace; }
+    .trade-analytics-card { border: 1px solid var(--rule); background: var(--paper); padding: 14px; margin-bottom: 18px; }
+    .trade-chart-toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+    .trade-chart-legend { display:flex; gap:16px; font-size:11px; color:var(--ink-muted); }
+    .legend-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; }
+    .legend-dot.litmus1 { background:#4f8cff; } .legend-dot.litmus2 { background:#c084fc; }
+    .trade-chart-summary { font-size:12px; color:var(--ink-muted); margin:12px 0 4px; }
+    .trade-chart-wrap { position:relative; overflow-x:auto; }
+    #trade-chart { display:block; width:100%; min-width:620px; height:300px; }
+    #trade-chart .chart-grid { stroke:var(--rule-light); stroke-width:1; }
+    #trade-chart .chart-axis { stroke:var(--rule); stroke-width:1; }
+    #trade-chart .chart-label { fill:var(--ink-faint); font:10px 'IBM Plex Mono',monospace; }
+    #trade-chart .trade-bar { cursor:pointer; opacity:.88; }
+    #trade-chart .trade-bar:hover, #trade-chart .trade-bar:focus { opacity:1; stroke:var(--ink); stroke-width:1.5; }
+    .trade-chart-tooltip { position:absolute; pointer-events:none; z-index:2; padding:8px 10px; background:var(--bg-dark); color:var(--text); border:1px solid var(--border); border-radius:4px; font-size:11px; line-height:1.5; box-shadow:0 3px 12px rgba(0,0,0,.2); }
+    .trade-section-heading { display:flex; justify-content:space-between; align-items:center; font-size:12px; font-weight:700; color:var(--ink); margin:12px 0 8px; }
+    .trade-ledger-status { font-size:10px; font-weight:400; color:var(--ink-faint); }
 
     /* ── Modal ───────────────────────────── */
     .modal-overlay {
@@ -730,9 +746,19 @@
     <!-- Trades Panel -->
     <div class="panel" id="panel-trades">
       <div class="settings-content">
-        <h2>Live Trades</h2>
-        <p class="subtitle">Real-time order activity from the agent</p>
-        <div id="trades-feed"><div class="no-data">No trades yet. Start the agent to see live activity.</div></div>
+        <h2>Trades &amp; P/L</h2>
+        <p class="subtitle">Broker-confirmed fills only. Tool-call attempts and unfilled orders are excluded from realized P/L.</p>
+        <div class="trade-analytics-card">
+          <div class="trade-chart-toolbar">
+            <div class="trade-chart-legend"><span><i class="legend-dot litmus1"></i>Litmus 1</span><span><i class="legend-dot litmus2"></i>Litmus 2</span></div>
+            <button class="btn sm" onclick="loadVerifiedTrades()">Refresh</button>
+          </div>
+          <div id="trade-chart-summary" class="trade-chart-summary">Loading verified fills...</div>
+          <div class="trade-chart-wrap"><svg id="trade-chart" viewBox="0 0 900 300" role="img" aria-label="Realized profit and loss by trade over time"></svg><div id="trade-chart-tooltip" class="trade-chart-tooltip" hidden></div></div>
+          <div id="trade-chart-empty" class="no-data" hidden>No realized fills yet. Open and close paper positions to populate the chart.</div>
+        </div>
+        <div class="trade-section-heading"><span>Verified Trade History</span><span id="trade-ledger-status" class="trade-ledger-status"></span></div>
+        <div id="trades-feed"><div class="no-data">Loading verified trades...</div></div>
       </div>
     </div>
 
@@ -1173,6 +1199,7 @@ function switchTab(id) {
   const panel = document.getElementById('panel-' + id);
   if (panel) panel.classList.add('active');
   if (id === 'history' && !historyState.loaded) loadHistoryPanel();
+  if (id === 'trades') loadVerifiedTrades();
 }
 
 async function refreshSelectedSandboxView() {
@@ -1815,17 +1842,103 @@ function clearPortfolioView(sid) {
   }
 }
 
-// ── Trade feed ─────────────────────────────
-function addTradeCard(trade) {
-  const feed = document.getElementById('trades-feed');
-  if(feed.querySelector('.no-data')) feed.innerHTML = '';
-  const card = document.createElement('div');
-  card.className = 'trade-card';
-  const t = trade.timestamp ? new Date(trade.timestamp).toLocaleTimeString('en-US',{hour12:false}) : '--';
-  card.innerHTML = '<div class="trade-header"><span class="trade-symbol">' + esc(trade.symbol||'??') + '</span><span class="trade-side ' + (trade.side||'') + '">' + esc(trade.side||'--') + '</span></div><div class="trade-details">' + esc(trade.tool||'') + (trade.quantity?' | Qty: '+trade.quantity:'') + (trade.price?' | $'+trade.price:'') + '</div><div class="trade-time">' + t + '</div>';
-  feed.insertBefore(card, feed.firstChild);
-  while(feed.children.length > 50) feed.removeChild(feed.lastChild);
+// ── Verified trade ledger and chart ─────────
+let verifiedTrades = [];
+let verifiedOrders = [];
+let verifiedTradesLoading = false;
+
+function fmtPnl(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return 'P/L pending';
+  const n = Number(value);
+  return (n >= 0 ? '+' : '') + '$' + n.toFixed(2);
 }
+
+function clearTradeFeed() {
+  const feed = document.getElementById('trades-feed');
+  if (feed) feed.innerHTML = '';
+  return feed;
+}
+
+function renderVerifiedTradeFeed() {
+  const feed = clearTradeFeed();
+  const filled = verifiedOrders.filter(o => ['filled','partially_filled','partially-filled'].includes(String(o.Status || o.status || '').toLowerCase()));
+  if (!filled.length) {
+    feed.innerHTML = '<div class="no-data">No broker-confirmed fills yet.</div>';
+    return;
+  }
+  const realizedByOrder = new Map();
+  verifiedTrades.forEach(t => realizedByOrder.set(t.orderId, t));
+  filled.sort((a,b) => new Date(b.FilledAt || b.SubmittedAt || b.filledAt || b.submittedAt || 0) - new Date(a.FilledAt || a.SubmittedAt || a.filledAt || a.submittedAt || 0));
+  filled.slice(0, 100).forEach(order => {
+    const side = String(order.Side || order.side || '').toLowerCase();
+    const price = Number(order.FilledAvgPrice ?? order.filledAvgPrice);
+    const quantity = Number(order.FilledQty ?? order.filledQty);
+    const time = order.FilledAt || order.SubmittedAt || order.filledAt || order.submittedAt;
+    const trade = realizedByOrder.get(order.ID || order.id);
+    const card = document.createElement('div');
+    card.className = 'trade-card';
+    const header = document.createElement('div'); header.className = 'trade-header';
+    const symbol = document.createElement('span'); symbol.className = 'trade-symbol'; symbol.textContent = order.Symbol || order.symbol || '??';
+    const sideEl = document.createElement('span'); sideEl.className = 'trade-side ' + side; sideEl.textContent = side || '--';
+    header.append(symbol, sideEl); card.appendChild(header);
+    const details = document.createElement('div'); details.className = 'trade-details';
+    details.textContent = `${order.accountName || 'Unknown account'} / ${order.agentName || 'Unassigned'} | ${quantity || '?'} @ ${Number.isFinite(price) ? '$' + price.toFixed(2) : 'price pending'} | ${trade ? fmtPnl(trade.pnl) : 'P/L pending'}`;
+    const stamp = document.createElement('div'); stamp.className = 'trade-time'; stamp.textContent = time ? new Date(time).toLocaleString() : '--';
+    card.append(details, stamp); feed.appendChild(card);
+  });
+}
+
+function renderTradeChart() {
+  const svg = document.getElementById('trade-chart');
+  const empty = document.getElementById('trade-chart-empty');
+  if (!svg) return;
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const data = verifiedTrades.filter(t => Number.isFinite(Number(t.pnl))).sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+  empty.hidden = data.length > 0;
+  if (!data.length) return;
+  const W=900, H=300, left=58, right=18, top=18, bottom=38, plotW=W-left-right, plotH=H-top-bottom;
+  const maxAbs=Math.max(1, ...data.map(t => Math.abs(Number(t.pnl))));
+  const zero=top+plotH/2;
+  const y=v => zero-(Number(v)/maxAbs)*(plotH/2-.5);
+  const ns='http://www.w3.org/2000/svg';
+  const make=(tag,attrs={})=>{const n=document.createElementNS(ns,tag);Object.entries(attrs).forEach(([k,v])=>n.setAttribute(k,v));return n;};
+  [top,zero,H-bottom].forEach(v=>svg.appendChild(make('line',{x1:left,y1:v,x2:W-right,y2:v,class:'chart-grid'})));
+  const yl=make('text',{x:left-8,y:top+4,'text-anchor':'end',class:'chart-label'}); yl.textContent='+'+fmtPnl(maxAbs); svg.appendChild(yl);
+  const zl=make('text',{x:left-8,y:zero+4,'text-anchor':'end',class:'chart-label'}); zl.textContent='$0'; svg.appendChild(zl);
+  const nl=make('text',{x:left-8,y:H-bottom+4,'text-anchor':'end',class:'chart-label'}); nl.textContent=fmtPnl(-maxAbs); svg.appendChild(nl);
+  svg.appendChild(make('line',{x1:left,y1:zero,x2:W-right,y2:zero,class:'chart-axis'}));
+  const gap=Math.max(2,Math.min(10,plotW/data.length*.2)), barW=Math.max(4,(plotW/data.length)-gap);
+  data.forEach((t,i)=>{
+    const val=Number(t.pnl), x=left+i*(plotW/data.length)+(gap/2), yy=val>=0?y(val):zero, h=Math.max(2,Math.abs(y(val)-zero));
+    const bar=make('rect',{x,y:yy,width:barW,height:h,rx:2,class:'trade-bar',fill:(t.accountId||'').endsWith('4caa9897')||String(t.accountName||'').toLowerCase().includes('1')?'#4f8cff':'#c084fc','tabindex':'0'});
+    const tip=`${t.accountName || 'Unknown account'} / ${t.agentName || 'Unassigned'}\n${t.symbol}\n${fmtPnl(val)}\n${new Date(t.timestamp).toLocaleString()}`;
+    bar.addEventListener('mouseenter',e=>showTradeTooltip(e,tip)); bar.addEventListener('focus',e=>showTradeTooltip(e,tip)); bar.addEventListener('mouseleave',hideTradeTooltip); bar.addEventListener('blur',hideTradeTooltip);
+    svg.appendChild(bar);
+  });
+}
+function showTradeTooltip(event,text){const tip=document.getElementById('trade-chart-tooltip');if(!tip)return;tip.hidden=false;tip.textContent=text;const r=document.querySelector('.trade-chart-wrap').getBoundingClientRect();tip.style.left=Math.max(4,event.clientX-r.left+8)+'px';tip.style.top=Math.max(4,event.clientY-r.top-70)+'px';}
+function hideTradeTooltip(){const tip=document.getElementById('trade-chart-tooltip');if(tip)tip.hidden=true;}
+
+async function loadVerifiedTrades() {
+  if (verifiedTradesLoading) return;
+  verifiedTradesLoading = true;
+  try {
+    const res = await fetch('/api/trades');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json(); verifiedTrades=data.trades||[]; verifiedOrders=data.orders||[];
+    const summary=document.getElementById('trade-chart-summary');
+    const pnl=verifiedTrades.reduce((sum,t)=>sum+Number(t.pnl||0),0);
+    if(summary) summary.textContent=`${verifiedTrades.length} realized trade${verifiedTrades.length===1?'':'s'} | Net P/L ${fmtPnl(pnl)} | Open/unmatched fills are shown as P/L pending.`;
+    const status=document.getElementById('trade-ledger-status'); if(status) status.textContent='Updated '+new Date(data.generatedAt||Date.now()).toLocaleTimeString();
+    renderTradeChart(); renderVerifiedTradeFeed();
+  } catch(err) {
+    const summary=document.getElementById('trade-chart-summary'); if(summary) summary.textContent='Unable to load the verified trade ledger: '+err.message;
+    const feed=clearTradeFeed(); if(feed) feed.innerHTML='<div class="no-data">Trade ledger unavailable.</div>';
+  } finally { verifiedTradesLoading=false; }
+}
+
+// ── Legacy live card compatibility ─────────
+function addTradeCard(trade) { loadVerifiedTrades(); }
 
 // ── Render config panels ───────────────────
 function renderAll() {
