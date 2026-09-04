@@ -26,6 +26,8 @@ test('routine Go HTTP access logs stay out of agent terminals', () => {
   assert.equal(shouldShowGoLogLine('[GIN-debug] GET /health --> healthHandler'), false);
   assert.equal(shouldShowGoLogLine('[go] [GIN-debug] GET /health --> healthHandler'), false);
   assert.equal(shouldShowGoLogLine('[go] [GIN] 2026/09/03 - 01:25:46 | 200 | 1.1ms | 127.0.0.1 | GET "/health"'), false);
+  assert.equal(shouldShowGoLogLine('[go:4543] time="2026-09-04T07:04:53Z" level=info msg="Fetching historical bars" symbol=GLD timeframe=1Day'), false);
+  assert.equal(shouldShowGoLogLine('[go:4543] time="2026-09-04T07:04:53Z" level=info msg="Fetched historical bars" count=21'), false);
   assert.equal(shouldShowGoLogLine('[GIN] 2026/09/03 - 01:25:46 | 500 | 90.261461ms | 127.0.0.1 | GET "/api/v1/account"'), true);
   assert.equal(shouldShowGoLogLine('level=info msg="Activity logging session started"'), true);
   assert.equal(shouldShowGoLogLine('[GIN] panic recovered while serving request'), true);
