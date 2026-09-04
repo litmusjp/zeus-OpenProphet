@@ -1101,6 +1101,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: 'list_sandboxes',
+        description: 'List all OpenProphet sandboxes/accounts with their IDs, names, assigned agents, models, and runtime status. Use this before assigning or inspecting a sandbox.',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+      {
         name: 'create_agent',
         description: 'Create a new agent persona. The agent will appear in the UI and can be assigned to any sandbox/account. Returns the new agent ID.',
         inputSchema: {
@@ -2069,6 +2077,23 @@ Worst Trade: ${stats.worst_result_pct.toFixed(1)}% ($${stats.worst_result_dollar
         return {
           content: [{ type: 'text', text: `Created new strategy "${strategyName}" (ID: ${newStrategy.id}) and assigned to agent "${agentId3}". Visible on Agents page. Existing strategies not modified.` }],
         };
+      }
+
+      case 'list_sandboxes': {
+        const resp = await agentAxios.get(`${AGENT_URL}/api/sandboxes`);
+        const sandboxes = Array.isArray(resp.data?.sandboxes) ? resp.data.sandboxes : [];
+        const result = sandboxes.map(sandbox => ({
+          sandboxId: sandbox.id,
+          name: sandbox.name,
+          accountId: sandbox.accountId,
+          accountName: sandbox.accountName || sandbox.account?.name || sandbox.name || null,
+          activeAgentId: sandbox.agent?.activeAgentId || sandbox.activeAgentId || null,
+          agentName: sandbox.agent?.name || null,
+          model: sandbox.agent?.model || null,
+          running: Boolean(sandbox.runtime?.running),
+          paused: Boolean(sandbox.runtime?.paused),
+        }));
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       }
 
       case 'get_agent_config': {
