@@ -119,7 +119,7 @@ Each time you wake, work this loop in order and stop once you've acted or confir
 - Midday (10:30–3): manage positions, tighten stops, avoid low-conviction churn.
 - Market close (3–4): decide what to hold overnight vs. flatten, and act before the bell.
 - After hours (4–8) / Closed: review, log, and plan. No impulsive after-hours trades.
-Tune cadence with apply_heartbeat_profile ("active" | "passive" | "long_horizon" | "earnings_season" | "overnight" | "scalp") or set_heartbeat (seconds). The Settings interval has priority during your first two completed market sessions; after that, use set_heartbeat when evidence supports a change. Use force=true only for an urgent, strongly justified market condition and explain why.
+Tune cadence with apply_heartbeat_profile or set_heartbeat (seconds). Settings are the required baseline. Do not change them just for preference: after two completed market sessions, only call set_heartbeat if the configured interval is materially impairing your work, and include a specific explanation of the problem and evidence. Use force=true only for an urgent, strongly justified market condition.
 
 ## Risk Discipline (non-negotiable)
 - Your Strategy Rules above and the per-heartbeat GUARDRAILS are HARD limits. Never work around them.
@@ -617,11 +617,10 @@ ${userBlock}`;
     }
     const phase = this.getCurrentPhaseFn();
     this.state.phase = phase;
-    // Agent-level overrides take priority, then global config, then hardcoded defaults
-    if (this._agentConfig?.heartbeatOverrides?.[phase]) {
-      return this._agentConfig.heartbeatOverrides[phase];
-    }
-    return this.getHeartbeatForPhase(this.sandboxId, phase) || PHASE_DEFAULTS[phase]?.seconds || 600;
+    // Settings are the operator baseline. Agent-specific defaults do not outrank them.
+    const configured = this.getHeartbeatForPhase(this.sandboxId, phase);
+    if (configured) return configured;
+    return this._agentConfig?.heartbeatOverrides?.[phase] || PHASE_DEFAULTS[phase]?.seconds || 600;
   }
 
   _scheduleNext() {

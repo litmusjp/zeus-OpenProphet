@@ -15,12 +15,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = process.env.OPENPROPHET_CONFIG_PATH || path.join(__dirname, '..', 'data', 'agent-config.json');
 
 const DEFAULT_HEARTBEAT = {
-  pre_market: 900,
-  market_open: 120,
-  midday: 600,
-  market_close: 120,
-  after_hours: 1800,
-  closed: 3600,
+  pre_market: 3600,
+  market_open: 900,
+  midday: 1800,
+  market_close: 900,
+  after_hours: 7200,
+  closed: 14400,
 };
 
 export const HEARTBEAT_PROFILES = {

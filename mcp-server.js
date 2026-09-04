@@ -2158,8 +2158,9 @@ Worst Trade: ${stats.worst_result_pct.toFixed(1)}% ($${stats.worst_result_dollar
         await agentAxios.post(`${AGENT_URL}/api/agent/heartbeat`, {
           seconds,
           force: Boolean(args.force),
+          agentRequest: true,
           sandboxId: OPENPROPHET_SANDBOX_ID,
-          reason: args.reason || `Agent override to ${seconds}s`,
+          reason: args.reason,
         });
         return {
           content: [{ type: 'text', text: `Heartbeat interval set to ${seconds}s. ${args.reason || ''}` }],

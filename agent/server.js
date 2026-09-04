@@ -1195,7 +1195,7 @@ app.put('/api/sandboxes/:id/strategy-rules', async (req, res) => {
 // The agent will see this error and should report it to the operator.
 
 app.post('/api/agent/heartbeat', (req, res) => {
-  const { seconds, reason, sandboxId, force = false } = req.body;
+  const { seconds, reason, sandboxId, force = false, agentRequest = false } = req.body;
   if (!Number.isFinite(seconds) || seconds < 30 || seconds > MAX_HEARTBEAT_SECONDS) {
     return res.status(400).json({ error: `seconds must be 30-${MAX_HEARTBEAT_SECONDS}` });
   }
@@ -1207,6 +1207,9 @@ app.post('/api/agent/heartbeat', (req, res) => {
       completedMarketSessions: targetHarness.getCompletedMarketSessions(),
       requiredMarketSessions: HEARTBEAT_OVERRIDE_WARMUP_SESSIONS,
     });
+  }
+  if (agentRequest && (!reason || String(reason).trim().length < 20)) {
+    return res.status(400).json({ error: 'Agents must explain how the configured interval is impairing their work' });
   }
   if (force && (!reason || String(reason).trim().length < 12)) {
     return res.status(400).json({ error: 'A meaningful reason is required for an early heartbeat override' });
