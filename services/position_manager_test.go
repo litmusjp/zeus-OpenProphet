@@ -68,21 +68,31 @@ func TestManagedProtectiveLegsPersistIntentBeforeSubmit(t *testing.T) {
 		place    func(*PositionManager, *ManagedPosition) error
 	}{
 		{
-			name:     "stop_loss",
-			position: func() *ManagedPosition { return &ManagedPosition{ID: "p1", Symbol: "AAPL", Side: "buy", RemainingQty: 10, StopLossPrice: 90} },
-			place:    func(pm *PositionManager, pos *ManagedPosition) error { return pm.placeStopLossOrder(context.Background(), pos) },
+			name: "stop_loss",
+			position: func() *ManagedPosition {
+				return &ManagedPosition{ID: "p1", Symbol: "AAPL", Side: "buy", RemainingQty: 10, StopLossPrice: 90}
+			},
+			place: func(pm *PositionManager, pos *ManagedPosition) error {
+				return pm.placeStopLossOrder(context.Background(), pos)
+			},
 		},
 		{
-			name:     "take_profit",
-			position: func() *ManagedPosition { return &ManagedPosition{ID: "p2", Symbol: "AAPL", Side: "buy", RemainingQty: 10, TakeProfitPrice: 110} },
-			place:    func(pm *PositionManager, pos *ManagedPosition) error { return pm.placeTakeProfitOrder(context.Background(), pos) },
+			name: "take_profit",
+			position: func() *ManagedPosition {
+				return &ManagedPosition{ID: "p2", Symbol: "AAPL", Side: "buy", RemainingQty: 10, TakeProfitPrice: 110}
+			},
+			place: func(pm *PositionManager, pos *ManagedPosition) error {
+				return pm.placeTakeProfitOrder(context.Background(), pos)
+			},
 		},
 		{
 			name: "partial_exit",
 			position: func() *ManagedPosition {
 				return &ManagedPosition{ID: "p3", Symbol: "AAPL", Side: "buy", Quantity: 10, RemainingQty: 10, PartialExit: &PartialExitConfig{Enabled: true, Percent: 50, TargetPrice: 105}}
 			},
-			place: func(pm *PositionManager, pos *ManagedPosition) error { return pm.placePartialExitOrder(context.Background(), pos) },
+			place: func(pm *PositionManager, pos *ManagedPosition) error {
+				return pm.placePartialExitOrder(context.Background(), pos)
+			},
 		},
 	}
 
@@ -141,11 +151,11 @@ func TestCloseManagedPositionPersistsExitIntentOnAmbiguousSubmit(t *testing.T) {
 	pos := &ManagedPosition{ID: "c1", Symbol: "AAPL", Side: "buy", Status: "ACTIVE", RemainingQty: 10}
 	pm.positions[pos.ID] = pos
 
-	if err := pm.CloseManagedPosition(context.Background(), pos.ID); err != nil {
-		t.Fatalf("CloseManagedPosition() error = %v", err)
+	if err := pm.CloseManagedPosition(context.Background(), pos.ID); err == nil {
+		t.Fatal("expected CloseManagedPosition to report an unconfirmed exit")
 	}
-	if pos.Status != "CLOSED" {
-		t.Fatalf("position status = %q, want CLOSED even when the exit submit fails", pos.Status)
+	if pos.Status != "ACTIVE" {
+		t.Fatalf("position status = %q, want ACTIVE when the exit submit fails", pos.Status)
 	}
 	if rec.placed == nil || rec.placed.ClientOrderID == "" {
 		t.Fatalf("exit PlaceOrder should carry a ClientOrderID, got %#v", rec.placed)
@@ -156,5 +166,22 @@ func TestCloseManagedPositionPersistsExitIntentOnAmbiguousSubmit(t *testing.T) {
 	}
 	if len(failed) != 1 || failed[0].ClientOrderID != rec.placed.ClientOrderID {
 		t.Fatalf("expected the ambiguous exit persisted as submit_failed for reconciliation, got %#v", failed)
+	}
+}
+
+func TestValidateRequestRejectsInvalidManagedRiskLevels(t *testing.T) {
+	entry, stop, target := 100.0, 90.0, 110.0
+	valid := &PlaceManagedPositionRequest{
+		Symbol: "AAPL", Side: "buy", AllocationDollars: 1000, EntryStrategy: "limit",
+		EntryPrice: &entry, StopLossPrice: &stop, TakeProfitPrice: &target,
+	}
+	pm := &PositionManager{}
+	if err := pm.validateRequest(valid); err != nil {
+		t.Fatalf("valid request rejected: %v", err)
+	}
+	badStop := 0.0
+	valid.StopLossPrice = &badStop
+	if err := pm.validateRequest(valid); err == nil {
+		t.Fatal("expected non-positive stop loss to be rejected")
 	}
 }

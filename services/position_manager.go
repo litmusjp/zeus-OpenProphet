@@ -27,47 +27,47 @@ func newClientOrderID() (string, error) {
 
 // ManagedPosition represents a position with automated risk management
 type ManagedPosition struct {
-	ID                string                 `json:"id"`
-	Symbol            string                 `json:"symbol"`
-	Side              string                 `json:"side"` // "buy" or "sell"
-	Strategy          string                 `json:"strategy"` // "SWING_TRADE", "LONG_TERM", "DAY_TRADE"
+	ID       string `json:"id"`
+	Symbol   string `json:"symbol"`
+	Side     string `json:"side"`     // "buy" or "sell"
+	Strategy string `json:"strategy"` // "SWING_TRADE", "LONG_TERM", "DAY_TRADE"
 
 	// Entry details
-	Quantity          float64                `json:"quantity"`
-	EntryPrice        float64                `json:"entry_price"`
-	EntryOrderID      string                 `json:"entry_order_id"`
-	EntryOrderType    string                 `json:"entry_order_type"` // "market", "limit"
-	AllocationDollars float64                `json:"allocation_dollars"`
+	Quantity          float64 `json:"quantity"`
+	EntryPrice        float64 `json:"entry_price"`
+	EntryOrderID      string  `json:"entry_order_id"`
+	EntryOrderType    string  `json:"entry_order_type"` // "market", "limit"
+	AllocationDollars float64 `json:"allocation_dollars"`
 
 	// Risk management
-	StopLossPrice     float64                `json:"stop_loss_price"`
-	StopLossPercent   float64                `json:"stop_loss_percent"`
-	StopLossOrderID   string                 `json:"stop_loss_order_id,omitempty"`
-	TrailingStop      bool                   `json:"trailing_stop"`
-	TrailingPercent   float64                `json:"trailing_percent,omitempty"`
+	StopLossPrice   float64 `json:"stop_loss_price"`
+	StopLossPercent float64 `json:"stop_loss_percent"`
+	StopLossOrderID string  `json:"stop_loss_order_id,omitempty"`
+	TrailingStop    bool    `json:"trailing_stop"`
+	TrailingPercent float64 `json:"trailing_percent,omitempty"`
 
 	// Profit targets
-	TakeProfitPrice   float64                `json:"take_profit_price"`
-	TakeProfitPercent float64                `json:"take_profit_percent"`
-	TakeProfitOrderID string                 `json:"take_profit_order_id,omitempty"`
+	TakeProfitPrice   float64 `json:"take_profit_price"`
+	TakeProfitPercent float64 `json:"take_profit_percent"`
+	TakeProfitOrderID string  `json:"take_profit_order_id,omitempty"`
 
 	// Partial exit strategy
-	PartialExit       *PartialExitConfig     `json:"partial_exit,omitempty"`
-	PartialExitOrders []string               `json:"partial_exit_orders,omitempty"`
+	PartialExit       *PartialExitConfig `json:"partial_exit,omitempty"`
+	PartialExitOrders []string           `json:"partial_exit_orders,omitempty"`
 
 	// Status tracking
-	Status            string                 `json:"status"` // "PENDING", "ACTIVE", "PARTIAL", "CLOSED", "STOPPED_OUT", "FAILED"
-	CurrentPrice      float64                `json:"current_price"`
-	UnrealizedPL      float64                `json:"unrealized_pl"`
-	UnrealizedPLPC    float64                `json:"unrealized_pl_percent"`
-	RemainingQty      float64                `json:"remaining_qty"`
+	Status         string  `json:"status"` // "PENDING", "ACTIVE", "PARTIAL", "CLOSED", "STOPPED_OUT", "FAILED"
+	CurrentPrice   float64 `json:"current_price"`
+	UnrealizedPL   float64 `json:"unrealized_pl"`
+	UnrealizedPLPC float64 `json:"unrealized_pl_percent"`
+	RemainingQty   float64 `json:"remaining_qty"`
 
 	// Metadata
-	CreatedAt         time.Time              `json:"created_at"`
-	UpdatedAt         time.Time              `json:"updated_at"`
-	ClosedAt          *time.Time             `json:"closed_at,omitempty"`
-	Notes             string                 `json:"notes,omitempty"`
-	Tags              []string               `json:"tags,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	ClosedAt  *time.Time `json:"closed_at,omitempty"`
+	Notes     string     `json:"notes,omitempty"`
+	Tags      []string   `json:"tags,omitempty"`
 }
 
 // PartialExitConfig defines partial profit taking strategy
@@ -80,31 +80,31 @@ type PartialExitConfig struct {
 
 // PlaceManagedPositionRequest represents request to open a managed position
 type PlaceManagedPositionRequest struct {
-	Symbol            string              `json:"symbol" binding:"required"`
-	Side              string              `json:"side" binding:"required"` // "buy" or "sell"
-	Strategy          string              `json:"strategy"` // "SWING_TRADE", "LONG_TERM", "DAY_TRADE"
-	AllocationDollars float64             `json:"allocation_dollars" binding:"required,gt=0"`
+	Symbol            string  `json:"symbol" binding:"required"`
+	Side              string  `json:"side" binding:"required"` // "buy" or "sell"
+	Strategy          string  `json:"strategy"`                // "SWING_TRADE", "LONG_TERM", "DAY_TRADE"
+	AllocationDollars float64 `json:"allocation_dollars" binding:"required,gt=0"`
 
 	// Entry configuration
-	EntryStrategy     string              `json:"entry_strategy"` // "market", "limit"
-	EntryPrice        *float64            `json:"entry_price,omitempty"` // Required for limit orders
+	EntryStrategy string   `json:"entry_strategy"`        // "market", "limit"
+	EntryPrice    *float64 `json:"entry_price,omitempty"` // Required for limit orders
 
 	// Risk management (one of these required)
-	StopLossPrice     *float64            `json:"stop_loss_price,omitempty"`
-	StopLossPercent   *float64            `json:"stop_loss_percent,omitempty"`
-	TrailingStop      bool                `json:"trailing_stop"`
-	TrailingPercent   float64             `json:"trailing_percent,omitempty"`
+	StopLossPrice   *float64 `json:"stop_loss_price,omitempty"`
+	StopLossPercent *float64 `json:"stop_loss_percent,omitempty"`
+	TrailingStop    bool     `json:"trailing_stop"`
+	TrailingPercent float64  `json:"trailing_percent,omitempty"`
 
 	// Profit targets (one of these required)
-	TakeProfitPrice   *float64            `json:"take_profit_price,omitempty"`
-	TakeProfitPercent *float64            `json:"take_profit_percent,omitempty"`
+	TakeProfitPrice   *float64 `json:"take_profit_price,omitempty"`
+	TakeProfitPercent *float64 `json:"take_profit_percent,omitempty"`
 
 	// Partial exit (optional)
-	PartialExit       *PartialExitConfig  `json:"partial_exit,omitempty"`
+	PartialExit *PartialExitConfig `json:"partial_exit,omitempty"`
 
 	// Metadata
-	Notes             string              `json:"notes,omitempty"`
-	Tags              []string            `json:"tags,omitempty"`
+	Notes string   `json:"notes,omitempty"`
+	Tags  []string `json:"tags,omitempty"`
 }
 
 // PositionManager handles automated position management
@@ -113,12 +113,12 @@ type PositionManager struct {
 	dataService    interfaces.DataService
 	storageService *database.LocalStorage
 
-	positions      map[string]*ManagedPosition // position_id -> position
-	mu             sync.RWMutex
-	logger         *logrus.Logger
+	positions map[string]*ManagedPosition // position_id -> position
+	mu        sync.RWMutex
+	logger    *logrus.Logger
 
-	ctx            context.Context
-	cancel         context.CancelFunc
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewPositionManager creates a new position manager
@@ -568,12 +568,26 @@ func (pm *PositionManager) placePartialExitOrder(ctx context.Context, position *
 	return nil
 }
 
+// cancelSiblingExitOrders prevents a filled risk order from leaving other exits live.
+func (pm *PositionManager) cancelSiblingExitOrders(ctx context.Context, position *ManagedPosition, filledOrderID string) {
+	orderIDs := append([]string{position.StopLossOrderID, position.TakeProfitOrderID}, position.PartialExitOrders...)
+	for _, orderID := range orderIDs {
+		if orderID == "" || orderID == filledOrderID {
+			continue
+		}
+		if err := pm.tradingService.CancelOrder(ctx, orderID); err != nil {
+			pm.logger.WithError(err).WithField("order_id", orderID).Warn("Failed to cancel sibling risk order")
+		}
+	}
+}
+
 // manageRiskOrders checks and updates risk management orders
 func (pm *PositionManager) manageRiskOrders(ctx context.Context, position *ManagedPosition) {
 	// Check stop loss order status
 	if position.StopLossOrderID != "" {
 		order, err := pm.tradingService.GetOrder(ctx, position.StopLossOrderID)
 		if err == nil && order.Status == "filled" {
+			pm.cancelSiblingExitOrders(ctx, position, position.StopLossOrderID)
 			position.Status = "STOPPED_OUT"
 			now := time.Now()
 			position.ClosedAt = &now
@@ -587,6 +601,7 @@ func (pm *PositionManager) manageRiskOrders(ctx context.Context, position *Manag
 	if position.TakeProfitOrderID != "" {
 		order, err := pm.tradingService.GetOrder(ctx, position.TakeProfitOrderID)
 		if err == nil && order.Status == "filled" {
+			pm.cancelSiblingExitOrders(ctx, position, position.TakeProfitOrderID)
 			position.Status = "CLOSED"
 			now := time.Now()
 			position.ClosedAt = &now
@@ -597,18 +612,22 @@ func (pm *PositionManager) manageRiskOrders(ctx context.Context, position *Manag
 	}
 
 	// Check partial exit orders
+	filledPartialQty := 0.0
 	for _, orderID := range position.PartialExitOrders {
 		order, err := pm.tradingService.GetOrder(ctx, orderID)
 		if err == nil && order.Status == "filled" {
-			position.Status = "PARTIAL"
-			position.RemainingQty -= order.FilledQty
-			pm.logger.WithFields(logrus.Fields{
-				"position_id":   position.ID,
-				"filled_qty":    order.FilledQty,
-				"remaining_qty": position.RemainingQty,
-			}).Info("Partial exit filled")
-			pm.savePositionToDB(position)
+			filledPartialQty += math.Max(0, order.FilledQty)
 		}
+	}
+	if filledPartialQty > 0 {
+		position.Status = "PARTIAL"
+		position.RemainingQty = math.Max(0, position.Quantity-filledPartialQty)
+		pm.logger.WithFields(logrus.Fields{
+			"position_id":   position.ID,
+			"filled_qty":    filledPartialQty,
+			"remaining_qty": position.RemainingQty,
+		}).Info("Partial exit fills reconciled")
+		pm.savePositionToDB(position)
 	}
 }
 
@@ -796,7 +815,12 @@ func (pm *PositionManager) CloseManagedPosition(ctx context.Context, positionID 
 					pm.logger.WithError(saveErr).Warn("Failed to record market exit submission failure")
 				}
 				pm.logger.WithError(err).Error("Failed to place exit order (market may be closed)")
-				pm.logger.Info("Closing position in database despite order error")
+				position.Status = "ACTIVE"
+				if position.RemainingQty < position.Quantity {
+					position.Status = "PARTIAL"
+				}
+				pm.savePositionToDB(position)
+				return fmt.Errorf("failed to place market exit order: %w", err)
 			} else {
 				order.ID = result.OrderID
 				order.Status = result.Status
@@ -829,20 +853,58 @@ func (pm *PositionManager) validateRequest(req *PlaceManagedPositionRequest) err
 	if req.Side != "buy" && req.Side != "sell" {
 		return fmt.Errorf("side must be 'buy' or 'sell'")
 	}
-
-	if req.EntryStrategy == "limit" && req.EntryPrice == nil {
-		return fmt.Errorf("entry_price required for limit orders")
+	if req.EntryStrategy != "" && req.EntryStrategy != "market" && req.EntryStrategy != "limit" {
+		return fmt.Errorf("entry_strategy must be 'market' or 'limit'")
+	}
+	if req.EntryStrategy == "limit" && (req.EntryPrice == nil || !positiveFinite(*req.EntryPrice)) {
+		return fmt.Errorf("entry_price must be positive for limit orders")
+	}
+	if req.EntryPrice != nil && !positiveFinite(*req.EntryPrice) {
+		return fmt.Errorf("entry_price must be positive")
 	}
 
 	if req.StopLossPrice == nil && req.StopLossPercent == nil {
 		return fmt.Errorf("either stop_loss_price or stop_loss_percent required")
 	}
-
 	if req.TakeProfitPrice == nil && req.TakeProfitPercent == nil {
 		return fmt.Errorf("either take_profit_price or take_profit_percent required")
 	}
-
+	if req.StopLossPrice != nil && !positiveFinite(*req.StopLossPrice) {
+		return fmt.Errorf("stop_loss_price must be positive")
+	}
+	if req.TakeProfitPrice != nil && !positiveFinite(*req.TakeProfitPrice) {
+		return fmt.Errorf("take_profit_price must be positive")
+	}
+	if req.StopLossPercent != nil && !positiveFinite(*req.StopLossPercent) {
+		return fmt.Errorf("stop_loss_percent must be positive")
+	}
+	if req.TakeProfitPercent != nil && !positiveFinite(*req.TakeProfitPercent) {
+		return fmt.Errorf("take_profit_percent must be positive")
+	}
+	if req.TrailingStop && !positiveFinite(req.TrailingPercent) {
+		return fmt.Errorf("trailing_percent must be positive when trailing_stop is enabled")
+	}
+	if req.PartialExit != nil && req.PartialExit.Enabled {
+		if !positiveFinite(req.PartialExit.Percent) || req.PartialExit.Percent >= 100 {
+			return fmt.Errorf("partial_exit.percent must be between 0 and 100")
+		}
+		if !positiveFinite(req.PartialExit.TargetPercent) {
+			return fmt.Errorf("partial_exit.target_percent must be positive")
+		}
+	}
+	if req.EntryPrice != nil && req.StopLossPrice != nil && req.TakeProfitPrice != nil {
+		if req.Side == "buy" && !(*req.StopLossPrice < *req.EntryPrice && *req.TakeProfitPrice > *req.EntryPrice) {
+			return fmt.Errorf("buy stop loss must be below entry and take profit above entry")
+		}
+		if req.Side == "sell" && !(*req.StopLossPrice > *req.EntryPrice && *req.TakeProfitPrice < *req.EntryPrice) {
+			return fmt.Errorf("sell stop loss must be above entry and take profit below entry")
+		}
+	}
 	return nil
+}
+
+func positiveFinite(value float64) bool {
+	return value > 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
 }
 
 func (pm *PositionManager) getCurrentPrice(ctx context.Context, symbol string) (float64, error) {

@@ -11,10 +11,12 @@ import { fileURLToPath } from 'url';
 import { spawn, execSync } from 'child_process';
 import { randomBytes } from 'crypto';
 import axios from 'axios';
-import { AgentHarness, buildSystemPrompt } from './harness.js';
+import Database from 'better-sqlite3';
+import { AgentHarness, buildSystemPrompt, getOpenCodeEnvCredential, hasOpenCodeCredential } from './harness.js';
+import { buildTradeLedger } from './trade-ledger.js';
 import ChatStore from './chat-store.js';
 import AgentOrchestrator from './orchestrator.js';
-import { alpacaTradingUrl, DEFAULT_AGENT_MODEL } from './defaults.js';
+import { alpacaTradingUrl, DEFAULT_AGENT_MODEL, MAX_HEARTBEAT_SECONDS, HEARTBEAT_OVERRIDE_WARMUP_SESSIONS } from './defaults.js';
 import { migrateLegacyDataForAccount } from './data-migration.js';
 import {
   loadConfig, getConfig, saveConfig,
@@ -53,6 +55,26 @@ function getSandboxDbPathForAccount(accountId) {
   return path.join(PROJECT_ROOT, 'data', 'sandboxes', accountId, 'prophet_trader.db');
 }
 
+function getPersistedSandboxOrders(sandbox) {
+  const dbPath = getSandboxDbPathForAccount(sandbox.accountId);
+  if (!existsSync(dbPath)) return [];
+  let db;
+  try {
+    db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    return db.prepare(`
+      SELECT order_id AS ID, symbol AS Symbol, qty AS Qty, side AS Side, type AS Type,
+             status AS Status, filled_qty AS FilledQty, filled_avg_price AS FilledAvgPrice,
+             submitted_at AS SubmittedAt, filled_at AS FilledAt
+      FROM orders ORDER BY submitted_at ASC
+    `).all();
+  } catch (err) {
+    console.warn(`[trades] Could not read ${sandbox.id} order ledger: ${err.message}`);
+    return [];
+  } finally {
+    try { db?.close(); } catch {}
+  }
+}
+
 // Pooled HTTP agent for Go backend calls — reuses TCP connections
 const goHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 10, keepAliveMsecs: 30000 });
 const goAxios = axios.create({
@@ -64,8 +86,9 @@ const goAxios = axios.create({
 
 const app = express();
 // --- BASIC AUTH SETUP ---
-const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER || 'admin';
-const BASIC_AUTH_PASS = process.env.BASIC_AUTH_PASS || 'secret';
+const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER || (process.env.NODE_ENV === 'production' ? '' : 'admin');
+const BASIC_AUTH_PASS = process.env.BASIC_AUTH_PASS || (process.env.NODE_ENV === 'production' ? '' : 'secret');
+const BASIC_AUTH_CONFIGURED = Boolean(BASIC_AUTH_USER && BASIC_AUTH_PASS);
 
 app.use((req, res, next) => {
   // Allow internal requests from localhost/container services without auth
@@ -80,16 +103,27 @@ app.use((req, res, next) => {
     return next();
   }
 
+  if (!BASIC_AUTH_CONFIGURED) {
+    return res.status(503).send('Basic authentication is not configured.');
+  }
+
   // Enforce Basic Auth for external web visitors
   const authHeader = req.headers.authorization;
-  if (!authHeader) {
+  if (!authHeader || !authHeader.startsWith('Basic ')) {
     res.setHeader('WWW-Authenticate', 'Basic realm="OpenProphet Dashboard"');
     return res.status(401).send('Authentication required.');
   }
 
-  const auth = Buffer.from(authHeader.split(' ')[1], 'base64').toString().split(':');
-  const user = auth[0];
-  const pass = auth[1];
+  let credentials;
+  try {
+    credentials = Buffer.from(authHeader.slice(6), 'base64').toString();
+  } catch {
+    res.setHeader('WWW-Authenticate', 'Basic realm="OpenProphet Dashboard"');
+    return res.status(401).send('Authentication required.');
+  }
+  const separator = credentials.indexOf(':');
+  const user = separator >= 0 ? credentials.slice(0, separator) : '';
+  const pass = separator >= 0 ? credentials.slice(separator + 1) : '';
 
   if (user === BASIC_AUTH_USER && pass === BASIC_AUTH_PASS) {
     return next();
@@ -110,9 +144,9 @@ function authMiddleware(req, res, next) {
   if (!AUTH_TOKEN) return next(); // no token configured = open access
   // Allow health check unauthenticated
   if (req.path === '/api/health') return next();
-  // Check Authorization header or query param
+  // Authorization headers avoid leaking bearer tokens through URLs and access logs.
   const header = req.headers.authorization;
-  const token = header?.startsWith('Bearer ') ? header.slice(7) : req.query.token;
+  const token = header?.startsWith('Bearer ') ? header.slice(7) : "";
   if (token === AUTH_TOKEN) return next();
   res.status(401).json({ error: 'Unauthorized. Set Authorization: Bearer <token> header.' });
 }
@@ -579,7 +613,19 @@ app.post('/api/agent/resume', (req, res) => {
 // ── Manager Chat ───────────────────────────────────────────────────
 let _managerSessionId = null;
 let _managerProc = null;
-const _managerSessions = []; // { id, startTime, messageCount }
+let _managerCurrentUserMessage = '';
+let _managerCurrentText = '';
+const MANAGER_HISTORY_ACCOUNT = '__manager__';
+const _managerSessions = []; // runtime cache; durable records live in ChatStore
+
+async function getManagerContext() {
+  const sessions = await chatStore.getRecentContext(MANAGER_HISTORY_ACCOUNT, {
+    sessionLimit: 6, messagesPerSession: 8, charLimit: 12000,
+  });
+  return sessions.length
+    ? `\n\n## Prior Manager Sessions (persisted)\nUse these as continuity context. Re-check current configuration with tools before acting.\n${JSON.stringify(sessions)}\n## End Prior Manager Sessions\n`
+    : '';
+}
 
 app.get('/api/manager/config', (req, res) => {
   const config = getConfig();
@@ -642,6 +688,8 @@ You help the user:
 ## Your Available Tools
 
 **Configuration** (your primary tools):
+- list_sandboxes: List every OpenProphet sandbox/account, exact sandbox ID, account name, assigned agent, model, and runtime status. Always call this when the user asks about accounts or sandboxes.
+- get_session_context: Retrieve compact prior Manager session context for continuity; verify current state with tools.
 - create_agent: Create a new agent with name, description, model, and optional custom identity prompt
 - create_strategy: Create a new strategy with name, description, and trading rules (markdown)
 - assign_agent_to_sandbox: Assign an agent to an account to activate it
@@ -689,9 +737,12 @@ ${message.trim()}${customPromptAddition}`;
     if (_managerSessionId) args.push('--session', _managerSessionId);
 
     const isNewSession = !_managerSessionId;
-    const fullPrompt = isNewSession 
-      ? managerPrompt
+    const priorManagerContext = isNewSession ? await getManagerContext() : '';
+    const fullPrompt = isNewSession
+      ? managerPrompt + priorManagerContext
       : `[Manager] User message:\n${message.trim()}`;
+    _managerCurrentUserMessage = message.trim();
+    _managerCurrentText = '';
     
     // Track session
     if (isNewSession) {
@@ -706,7 +757,7 @@ ${message.trim()}${customPromptAddition}`;
 
     const proc = spawn('opencode', args, {
       cwd: process.cwd(),
-      env: { ...process.env },
+      env: { ...process.env, OPENPROPHET_ROLE: 'manager' },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     _managerProc = proc;
@@ -730,7 +781,10 @@ ${message.trim()}${customPromptAddition}`;
           
           if (evt.type === 'text') {
             const text = part.text || evt.text || '';
-            if (text) broadcast('manager_text', { text });
+            if (text) {
+              _managerCurrentText += text;
+              broadcast('manager_text', { text });
+            }
           } else if (evt.type === 'tool_call') {
             const name = part.name || part.tool || evt.name || '?';
             const args = part.args || part.input || {};
@@ -750,8 +804,22 @@ ${message.trim()}${customPromptAddition}`;
     });
 
     proc.stderr.on('data', () => {});
-    proc.on('close', () => {
+    proc.on('close', async () => {
       if (_managerProc === proc) _managerProc = null;
+      // Persist Manager sessions outside process memory so restarts retain context.
+      if (_managerSessionId) {
+        await chatStore.startSession(MANAGER_HISTORY_ACCOUNT, _managerSessionId, {
+          mode: 'manager', agentId: 'manager', agentName: 'Manager',
+          accountId: MANAGER_HISTORY_ACCOUNT, accountName: 'Manager',
+          sandboxId: null, sandboxName: 'Manager', model: ocModel,
+        });
+        await chatStore.addMessage(MANAGER_HISTORY_ACCOUNT, _managerSessionId, {
+          role: 'user', kind: 'manager_message', content: _managerCurrentUserMessage,
+        });
+        await chatStore.addMessage(MANAGER_HISTORY_ACCOUNT, _managerSessionId, {
+          role: 'assistant', kind: 'manager_response', content: _managerCurrentText,
+        });
+      }
       // Update session tracking
       const last = _managerSessions[_managerSessions.length - 1];
       if (last && !last.id && _managerSessionId) last.id = _managerSessionId;
@@ -924,6 +992,9 @@ app.get('/api/sandboxes/:id/state', (req, res) => {
 app.post('/api/sandboxes/:id/start', async (req, res) => {
   try {
     if (isActiveSandbox(req.params.id)) {
+      // Keep the legacy active harness aligned when the first account was added after startup
+      // or when an active account changed without a successful rebind.
+      if (harness?.sandboxId !== req.params.id) rebindHarness();
       const account = getActiveAccount();
       if (!goReady && account) await startGoBackend(account);
       await harness.start();
@@ -1136,13 +1207,33 @@ app.put('/api/sandboxes/:id/strategy-rules', async (req, res) => {
 // The agent will see this error and should report it to the operator.
 
 app.post('/api/agent/heartbeat', (req, res) => {
-  const { seconds, reason, sandboxId } = req.body;
-  if (!seconds || seconds < 30 || seconds > 3600) return res.status(400).json({ error: 'seconds must be 30-3600' });
+  const { seconds, reason, sandboxId, force = false, agentRequest = false } = req.body;
+  if (!Number.isFinite(seconds) || seconds < 30 || seconds > MAX_HEARTBEAT_SECONDS) {
+    return res.status(400).json({ error: `seconds must be 30-${MAX_HEARTBEAT_SECONDS}` });
+  }
   const targetHarness = getHarnessForSandbox(sandboxId);
   if (!targetHarness) return res.status(404).json({ error: 'Sandbox harness not found' });
-  targetHarness.state.heartbeatOverride = { seconds, reason: reason || 'Manual override', oneTime: false };
-  targetHarness.state.emit('heartbeat_change', { seconds, reason: reason || 'Manual override from UI', sandboxId: sandboxId || targetHarness.sandboxId });
-  res.json({ ok: true, seconds });
+  if (!targetHarness.canAgentOverrideHeartbeat(force)) {
+    return res.status(409).json({
+      error: `Settings interval has priority until ${HEARTBEAT_OVERRIDE_WARMUP_SESSIONS} completed market sessions`,
+      completedMarketSessions: targetHarness.getCompletedMarketSessions(),
+      requiredMarketSessions: HEARTBEAT_OVERRIDE_WARMUP_SESSIONS,
+    });
+  }
+  if (agentRequest && (!reason || String(reason).trim().length < 20)) {
+    return res.status(400).json({ error: 'Agents must explain how the configured interval is impairing their work' });
+  }
+  if (force && (!reason || String(reason).trim().length < 12)) {
+    return res.status(400).json({ error: 'A meaningful reason is required for an early heartbeat override' });
+  }
+  targetHarness.state.heartbeatOverride = {
+    seconds, reason: reason || 'Agent override', oneTime: false, forced: Boolean(force),
+  };
+  targetHarness.state.emit('heartbeat_change', {
+    seconds, reason: reason || 'Agent override from UI', forced: Boolean(force),
+    sandboxId: sandboxId || targetHarness.sandboxId,
+  });
+  res.json({ ok: true, seconds, forced: Boolean(force), completedMarketSessions: targetHarness.getCompletedMarketSessions() });
 });
 
 // ── Safe Config (strip secrets) ────────────────────────────────────
@@ -1201,7 +1292,35 @@ app.get('/api/chats/all', async (req, res) => {
   try {
     const limit = Number(req.query.limit || 100);
     const sessions = await chatStore.listAllSessions(limit);
-    res.json({ sessions });
+    const decorated = sessions.map(session => {
+      const meta = session.metadata || {};
+      const account = meta.accountId ? getAccountById(meta.accountId) : null;
+      const sandbox = meta.sandboxId ? getSandbox(meta.sandboxId) : null;
+      return {
+        ...session,
+        metadata: {
+          ...meta,
+          accountName: meta.accountName || account?.name || (meta.mode === 'manager' ? 'Manager' : session.accountId),
+          sandboxName: meta.sandboxName || sandbox?.name || (meta.mode === 'manager' ? 'Manager' : meta.sandboxId),
+        },
+        accountName: meta.accountName || account?.name || (meta.mode === 'manager' ? 'Manager' : session.accountId),
+        sandboxName: meta.sandboxName || sandbox?.name || (meta.mode === 'manager' ? 'Manager' : meta.sandboxId),
+      };
+    });
+    res.json({ sessions: decorated });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/chats/context', async (req, res) => {
+  try {
+    const accountId = req.query.accountId || getActiveAccount()?.id;
+    if (!accountId) return res.status(400).json({ error: 'No account identifier' });
+    const context = await chatStore.getRecentContext(accountId, {
+      sessionLimit: Math.min(Number(req.query.sessions || 5), 20),
+      messagesPerSession: Math.min(Number(req.query.messages || 8), 20),
+      charLimit: Math.min(Number(req.query.chars || 12000), 30000),
+    });
+    res.json({ accountId, context });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1236,7 +1355,12 @@ app.get('/api/accounts', (req, res) => {
 
 app.post('/api/accounts', async (req, res) => {
   try {
+    const hadActiveSandbox = Boolean(getActiveSandbox());
     const account = await addAccount(req.body);
+    // A first account creates the active sandbox after the global harness was constructed
+    // during startup. Rebind it before the user can press Start, otherwise it has sandboxId
+    // null and reports "Sandbox not found: unknown".
+    if (!hadActiveSandbox && getActiveSandbox()?.accountId === account.id) rebindHarness();
     broadcast('config', safeConfig());
     res.json({ ok: true, account: { ...account, secretKey: '****' } });
   } catch (err) { res.status(400).json({ error: err.message }); }
@@ -1488,6 +1612,66 @@ app.post('/api/plugins/slack/test', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Failed to send test message: ' + err.message }); }
 });
 
+// ── Verified trade ledger ─────────────────────────────────────────
+async function reconcileSandboxOrders(sandbox) {
+  const localOrders = getPersistedSandboxOrders(sandbox);
+  try {
+    const activeAccount = getActiveAccount();
+    const isPrimary = activeAccount?.id === sandbox.accountId;
+    if (isPrimary) {
+      if (!goReady) await startGoBackend(activeAccount);
+    } else {
+      const runtime = orchestrator.getSandboxRuntime(sandbox.id);
+      if (!runtime?.goReady) await orchestrator.startGoBackend(sandbox.id);
+    }
+    const client = getGoClientForSandbox(sandbox.id);
+    if (!client) return localOrders;
+    const { data } = await client.get('/api/v1/orders', { params: { status: 'all' } });
+    const brokerOrders = Array.isArray(data) ? data : [];
+    const merged = new Map();
+    for (const order of localOrders) {
+      const key = order.ID || order.ClientOrderID || `${order.Symbol}:${order.SubmittedAt}`;
+      merged.set(key, order);
+    }
+    for (const order of brokerOrders) {
+      const key = order.ID || order.ClientOrderID || `${order.Symbol}:${order.SubmittedAt}`;
+      merged.set(key, { ...(merged.get(key) || {}), ...order });
+    }
+    return [...merged.values()].sort((a, b) => String(a.SubmittedAt || '').localeCompare(String(b.SubmittedAt || '')));
+  } catch (err) {
+    console.warn(`[trades] Alpaca reconciliation failed for ${sandbox.id}: ${err.message}`);
+    return localOrders;
+  }
+}
+
+app.get('/api/trades', async (req, res) => {
+  try {
+    const config = getConfig();
+    const requested = req.query.sandboxId;
+    const sandboxes = Object.values(config.sandboxes || {})
+      .filter(sandbox => !requested || sandbox.id === requested);
+    const orders = [];
+    const trades = [];
+    for (const sandbox of sandboxes) {
+      const account = getAccountById(sandbox.accountId);
+      if (!account) continue;
+      const metadata = {
+        accountId: account.id,
+        accountName: account.name,
+        agentId: getResolvedAgentForSandbox(sandbox.id)?.id || sandbox.agentId || null,
+        agentName: getResolvedAgentForSandbox(sandbox.id)?.name || 'Unassigned',
+        sandboxId: sandbox.id,
+      };
+      const sandboxOrders = await reconcileSandboxOrders(sandbox);
+      orders.push(...sandboxOrders.map(order => ({ ...order, ...metadata })));
+      trades.push(...buildTradeLedger(sandboxOrders, metadata));
+    }
+    res.json({ generatedAt: new Date().toISOString(), orders, trades });
+  } catch (err) {
+    res.status(500).json({ error: `Could not load verified trades: ${err.message}` });
+  }
+});
+
 // ── Portfolio Proxy ────────────────────────────────────────────────
 app.get('/api/portfolio/account', async (req, res) => {
   try {
@@ -1519,21 +1703,21 @@ app.get('/api/portfolio/orders', async (req, res) => {
 // ── Auth (OpenCode) ────────────────────────────────────────────────
 app.get('/api/auth/status', (req, res) => {
   // API key in env is the fastest check
-  if (process.env.ANTHROPIC_API_KEY) {
+  if (hasOpenCodeCredential('', process.env)) {
+    const envProvider = getOpenCodeEnvCredential(process.env)?.replace('_API_KEY', '') || 'Provider';
     return res.json({
       loggedIn: true,
       authMethod: 'api_key',
       provider: 'opencode',
-      raw: 'ANTHROPIC_API_KEY set in environment',
+      raw: `${envProvider} API key set in environment`,
     });
   }
   try {
     const out = execSync('opencode auth list 2>&1', { timeout: 5000, encoding: 'utf-8' });
-    // Parse the table output - look for "Anthropic" with "oauth" or any credential
-    const hasAnthropicAuth = out.includes('Anthropic') && (out.includes('oauth') || out.includes('api-key'));
+    const loggedIn = hasOpenCodeCredential(out, {});
     res.json({
-      loggedIn: hasAnthropicAuth,
-      authMethod: hasAnthropicAuth ? 'opencode_oauth' : 'none',
+      loggedIn,
+      authMethod: loggedIn ? 'opencode_credential' : 'none',
       provider: 'opencode',
       raw: out.replace(/\x1b\[[0-9;]*m/g, '').trim(), // strip ANSI codes
     });

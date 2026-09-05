@@ -9,14 +9,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, '..', 'data');
 
 export class ChatStore {
-  constructor() {
+  constructor(dataDir = DATA_DIR) {
+    this.dataDir = dataDir;
     this._writeQueues = new Map(); // accountId -> Promise chain
   }
 
   // ── Paths ────────────────────────────────────────────────────────
 
   _sandboxDir(accountId) {
-    return path.join(DATA_DIR, 'sandboxes', accountId);
+    return path.join(this.dataDir, 'sandboxes', accountId);
   }
 
   _chatDir(accountId) {
@@ -182,6 +183,40 @@ export class ChatStore {
     return index.sessions.find(s => s.id === sessionId) || null;
   }
 
+  /** Return a compact context window for a restarted agent or manager. */
+  async getRecentContext(accountId, opts = {}) {
+    const { sessionLimit = 5, messagesPerSession = 8, charLimit = 12000 } = opts;
+    const sessions = await this.listSessions(accountId, sessionLimit);
+    const context = [];
+    let chars = 0;
+    for (const session of sessions) {
+      const messages = await this.getSessionMessages(accountId, session.id, { limit: messagesPerSession });
+      const useful = messages.filter(m => m && (m.content || m.eventType || m.kind === 'tool_call'));
+      if (!useful.length) continue;
+      const block = {
+        sessionId: session.id,
+        createdAt: session.createdAt,
+        lastActiveAt: session.lastActiveAt,
+        metadata: session.metadata || {},
+        messages: useful.map(m => ({
+          timestamp: m.timestamp,
+          role: m.role,
+          kind: m.kind,
+          eventType: m.eventType,
+          content: typeof m.content === 'string' ? m.content.substring(0, 1800) : undefined,
+          tool: m.tool,
+          args: m.args,
+          result: typeof m.result === 'string' ? m.result.substring(0, 800) : undefined,
+        })),
+      };
+      const size = JSON.stringify(block).length;
+      if (chars + size > charLimit) break;
+      context.push(block);
+      chars += size;
+    }
+    return context;
+  }
+
   /**
    * Delete a session (messages + index entry).
    * @param {string} accountId
@@ -207,7 +242,7 @@ export class ChatStore {
    * @returns {Promise<Array>} - [{ accountId, ...session }]
    */
   async listAllSessions(limit = 100) {
-    const sandboxDir = path.join(DATA_DIR, 'sandboxes');
+    const sandboxDir = path.join(this.dataDir, 'sandboxes');
     let accountIds = [];
     try {
       accountIds = await fs.readdir(sandboxDir);

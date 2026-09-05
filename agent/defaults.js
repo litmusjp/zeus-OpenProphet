@@ -49,8 +49,10 @@ export function portForAgent(agentId, basePort = DEFAULT_TRADING_BOT_PORT) {
 export const BEAT_TIMEOUT_MS = 300000;        // hard cap per beat before SIGTERM
 export const SIGKILL_GRACE_MS = 5000;         // wait after SIGTERM before SIGKILL
 export const DEFAULT_MAX_TOOL_ROUNDS = 25;    // --max-turns default when perms don't set one
+export const MAX_HEARTBEAT_SECONDS = 14400;  // four-hour maximum for operator/agent cadence
+export const HEARTBEAT_OVERRIDE_WARMUP_SESSIONS = 2;
 export const BEAT_BACKOFF = {
   threshold: 3,     // consecutive failures before backoff engages
   factor: 16,       // max multiplier cap (2^(n-2) capped here)
-  capSeconds: 3600, // absolute ceiling on the backed-off interval
+  capSeconds: 14400, // absolute ceiling on the backed-off interval (4 hours)
 };

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/url"
 	"os"
@@ -178,6 +179,9 @@ func main() {
 
 func setupRouter(orderController *controllers.OrderController, newsController *controllers.NewsController, intelligenceController *controllers.IntelligenceController, positionController *controllers.PositionManagementController, activityController *controllers.ActivityController, economicFeedsController *controllers.EconomicFeedsController) *gin.Engine {
 	router := gin.Default()
+	if err := router.SetTrustedProxies(nil); err != nil {
+		panic(fmt.Sprintf("failed to disable trusted proxies: %v", err))
+	}
 
 	// Enable CORS
 	router.Use(func(c *gin.Context) {

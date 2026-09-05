@@ -46,6 +46,22 @@ async function freshStore(label) {
   };
 }
 
+test('OPENPROPHET_MODEL seeds a fresh installation with the selected provider model', async () => {
+  const previousModel = process.env.OPENPROPHET_MODEL;
+  process.env.OPENPROPHET_MODEL = 'opencode/mimo-v2.5-free';
+  const { store, cleanup } = await freshStore('env-model');
+  try {
+    const config = await store.loadConfig();
+    assert.equal(config.activeModel, 'opencode/mimo-v2.5-free');
+    assert.equal(config.manager.model, 'opencode/mimo-v2.5-free');
+    assert.ok(config.agents.every(agent => agent.model === 'opencode/mimo-v2.5-free'));
+  } finally {
+    if (previousModel === undefined) delete process.env.OPENPROPHET_MODEL;
+    else process.env.OPENPROPHET_MODEL = previousModel;
+    await cleanup();
+  }
+});
+
 test('built-in catalog has exactly eight agents and eight strategies with valid, unique, linked ids', async () => {
   const { store, cleanup } = await freshStore('shape');
   try {

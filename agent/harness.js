@@ -5,7 +5,7 @@ import { EventEmitter } from 'events';
 import fs from 'fs/promises';
 import path from 'path';
 import { renderToolMenu } from './tool-catalog.js';
-import { DEFAULT_AGENT_MODEL, DEFAULT_MAX_TOOL_ROUNDS, BEAT_TIMEOUT_MS, SIGKILL_GRACE_MS, BEAT_BACKOFF } from './defaults.js';
+import { DEFAULT_AGENT_MODEL, DEFAULT_MAX_TOOL_ROUNDS, BEAT_TIMEOUT_MS, SIGKILL_GRACE_MS, BEAT_BACKOFF, MAX_HEARTBEAT_SECONDS, HEARTBEAT_OVERRIDE_WARMUP_SESSIONS } from './defaults.js';
 
 // Default max tool rounds; overridden by permissions config at runtime
 
@@ -30,6 +30,41 @@ export function getCurrentPhase() {
     if (cfg.range && mins >= cfg.range[0] && mins < cfg.range[1]) return phase;
   }
   return 'closed';
+}
+
+// Keep a long phase interval from skipping the next market-phase boundary.
+// currentMinutes/currentSeconds are injectable for deterministic tests.
+export function getHeartbeatScheduleSeconds(baseSeconds, phase, currentMinutes = null, currentSeconds = 0) {
+  const range = PHASE_DEFAULTS[phase]?.range;
+  if (!range) return baseSeconds;
+  const minutes = currentMinutes ?? (() => {
+    const now = new Date();
+    const et = now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false });
+    const [h, m] = et.split(':').map(Number);
+    return h * 60 + m;
+  })();
+  const secondsUntilBoundary = (range[1] - minutes) * 60 - currentSeconds;
+  return secondsUntilBoundary > 0 ? Math.min(baseSeconds, secondsUntilBoundary) : baseSeconds;
+}
+
+export function tradeEventFromToolUse(fullToolName, toolInput = {}) {
+  const tool = String(fullToolName || '').replace('prophet_', '');
+  const defaultSides = {
+    place_buy_order: 'buy',
+    place_sell_order: 'sell',
+    place_options_order: null,
+    place_managed_position: 'buy',
+    close_managed_position: 'sell',
+  };
+  if (!Object.hasOwn(defaultSides, tool)) return null;
+  return {
+    type: 'order',
+    tool,
+    symbol: toolInput.symbol || '??',
+    side: toolInput.side || defaultSides[tool] || 'unknown',
+    quantity: toolInput.quantity || toolInput.qty,
+    price: toolInput.limit_price,
+  };
 }
 
 // ── System Prompt Builder ──────────────────────────────────────────
@@ -79,17 +114,26 @@ You are evidence-based, risk-first, and decisive. You do not trade out of boredo
 
 ${renderToolMenu()}
 
+OpenCode registers the OpenProphet MCP server as \`prophet\`. Call these tools with their exact registered names using the \`prophet_\` prefix (for example, \`prophet_get_datetime\`, \`prophet_get_account\`, and \`prophet_get_positions\`). Do not emit the unprefixed logical names as text.
+
 Call a tool for every fact. Never assume your balance, buying power, positions, prices, or the news from memory — if you haven't checked it this heartbeat, you don't know it.
 
 ## Your Heartbeat Loop
 Each time you wake, work this loop in order and stop once you've acted or confirmed there's nothing to do:
-1. ORIENT — get_datetime; note the market phase and your current heartbeat interval.
-2. ASSESS — get_account and get_positions. Know your cash, buying power, open risk, and P&L before deciding anything.
+1. ORIENT — call \`prophet_get_datetime\`; note the market phase and your current heartbeat interval.
+2. ASSESS — call \`prophet_get_account\` and \`prophet_get_positions\`. Know your cash, buying power, open risk, and P&L before deciding anything.
 3. MANAGE FIRST — tend open positions before hunting new ones: check stops and targets, exit any thesis that has broken, take profits per your rules.
 4. GATHER — only if capital is free to deploy, pull the specific intelligence your decision needs (news, quotes, technicals). Don't over-research.
-5. RECALL — before opening any NEW position, call find_similar_setups with your thesis and weigh how similar past setups actually resolved.
+5. RECALL — before opening any NEW position, call \`prophet_find_similar_setups\` with your thesis and weigh how similar past setups actually resolved.
 6. DECIDE & ACT — place an order only if you have a stated edge AND the guardrails allow it. Use a limit price and always pass a \`thesis\` argument. Otherwise do nothing and say so.
-7. RECORD — log_decision with the reasoning behind every trade; when a position closes, call store_trade_setup with the realized result so your memory compounds.
+7. RECORD — call \`prophet_log_decision\` with the reasoning behind every trade; when a position closes, call \`prophet_store_trade_setup\` with the realized result so your memory compounds.
+
+## Execution Contract (strict)
+- There is no queue, schedule, delayed-entry, or "place at market open" tool. Every order tool submits immediately to the broker.
+- A written plan, intention, watchlist item, or statement that you "will place" a trade is NOT an order and must never be reported as queued, submitted, or placed.
+- During pre-market, record and review a candidate plan only; do not submit a future entry to stage market-open execution.
+- At the first market-open heartbeat, re-check price, liquidity, account, positions, risk, and thesis, then call the exact registered order tool immediately if the setup remains valid. If you do not call the tool, report "not submitted".
+- Only report an order as placed/submitted after the order tool returns a broker response containing its order identity/status. Never claim an order was placed without that broker-confirmed response; never claim execution from your own narrative.
 
 ## Phase Playbook (ET)
 - Pre-market (4–9:30): gather intelligence, build a watchlist and theses. Don't chase thin pre-market prints.
@@ -97,7 +141,7 @@ Each time you wake, work this loop in order and stop once you've acted or confir
 - Midday (10:30–3): manage positions, tighten stops, avoid low-conviction churn.
 - Market close (3–4): decide what to hold overnight vs. flatten, and act before the bell.
 - After hours (4–8) / Closed: review, log, and plan. No impulsive after-hours trades.
-Tune cadence with apply_heartbeat_profile ("active" | "passive" | "long_horizon" | "earnings_season" | "overnight" | "scalp") or set_heartbeat (seconds) — speed up when volatile, slow down when quiet.
+Tune cadence with apply_heartbeat_profile or set_heartbeat (seconds). Settings are the required baseline. Do not change them just for preference: after two completed market sessions, only call set_heartbeat if the configured interval is materially impairing your work, and include a specific explanation of the problem and evidence. Use force=true only for an urgent, strongly justified market condition.
 
 ## Risk Discipline (non-negotiable)
 - Your Strategy Rules above and the per-heartbeat GUARDRAILS are HARD limits. Never work around them.
@@ -116,13 +160,33 @@ Tune cadence with apply_heartbeat_profile ("active" | "passive" | "long_horizon"
 }
 
 // ── Check CLI auth ─────────────────────────────────────────────────
+const OPENCODE_ENV_CREDENTIALS = [
+  'OPENCODE_API_KEY',
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'GOOGLE_API_KEY',
+  'GEMINI_API_KEY',
+];
+
+export function getOpenCodeEnvCredential(env = process.env) {
+  return OPENCODE_ENV_CREDENTIALS.find(key => String(env[key] || '').trim()) || null;
+}
+
+export function hasOpenCodeCredential(output = '', env = process.env) {
+  if (getOpenCodeEnvCredential(env)) return true;
+
+  const clean = String(output).replace(/\x1b\[[0-9;]*m/g, '');
+  return clean.split('\n').some(line =>
+    /^[^\w]*[●*]\s+.+\s+\S+\s*$/i.test(line.trim()),
+  );
+}
+
 export function checkCliAuth() {
-  // API key in env takes precedence — OpenCode picks it up automatically
-  if (process.env.ANTHROPIC_API_KEY) return true;
+  // Provider API keys in the environment take precedence.
+  if (hasOpenCodeCredential('', process.env)) return true;
   try {
     const out = execSync('opencode auth list 2>&1', { timeout: 5000, encoding: 'utf-8' });
-    // Look for Anthropic credential (oauth or env) in the output
-    return out.includes('Anthropic');
+    return hasOpenCodeCredential(out, {});
   } catch {
     return false;
   }
@@ -224,6 +288,7 @@ export class AgentHarness {
     this._beatTimeout = null;
     this._sessionEpoch = 0;
     this._consecutiveErrors = 0;
+    this._marketSessionDates = new Set();
   }
 
   _resolveSandbox() {
@@ -250,9 +315,13 @@ export class AgentHarness {
 
   async _persistSession(sessionId, metadata = {}) {
     if (!this.chatStore || !sessionId || !this.state.activeAccountId) return;
+    const sandbox = this._resolveSandbox();
+    const account = this._resolveAccount();
     await this.chatStore.startSession(this.state.activeAccountId, sessionId, {
       sandboxId: this.sandboxId,
+      sandboxName: sandbox?.name || this.sandboxId,
       accountId: this.state.activeAccountId,
+      accountName: account?.name || this.state.activeAccountId,
       agentId: this.state.activeAgentId,
       agentName: this._agentConfig?.name,
       model: this.state.activeModel,
@@ -260,10 +329,19 @@ export class AgentHarness {
     });
   }
 
+  async _priorContext() {
+    if (!this.chatStore || !this.state.activeAccountId) return '';
+    const sessions = await this.chatStore.getRecentContext(this.state.activeAccountId, {
+      sessionLimit: 4, messagesPerSession: 8, charLimit: 10000,
+    });
+    if (!sessions.length) return '';
+    return `\n\n## Prior Session Context (persisted)\nThese are compact excerpts from earlier sessions for this same account. Use them for continuity, but verify current prices, positions, and order status with live tools. Do not repeat old orders merely because they appear here.\n${JSON.stringify(sessions)}\n## End Prior Session Context\n`;
+  }
+
   async _persistMessages(sessionId, messages = []) {
     if (!this.chatStore || !sessionId || !this.state.activeAccountId) return;
     for (const message of messages) {
-      if (!message?.content?.trim()) continue;
+    if (!message || (!message?.content?.trim() && !message?.eventType && !message?.kind)) continue;
       await this.chatStore.addMessage(this.state.activeAccountId, sessionId, message);
     }
   }
@@ -273,7 +351,7 @@ export class AgentHarness {
 
     // Check CLI auth
     if (!this.checkCliAuthFn()) {
-      throw new Error('OpenCode not authenticated. Run "opencode auth login" or set ANTHROPIC_API_KEY in .env');
+      throw new Error('OpenCode not authenticated. Run "opencode auth login" or configure the API key for your selected provider (for example OPENCODE_API_KEY or ANTHROPIC_API_KEY).');
     }
 
     await this.reloadConfig({ resetSession: true, silent: true });
@@ -516,6 +594,7 @@ ${userBlock}`;
       await this._persistMessages(effectiveSessionId, [
         ...allMessages.map(content => ({ role: 'user', kind: 'message', beat: beatNum, content })),
         { role: 'assistant', kind: 'message', beat: beatNum, toolCalls: result.toolCalls || 0, content: result.text || '' },
+        ...(result.toolEvents || []),
       ]);
     } catch (err) {
       this.state.stats.errors++;
@@ -525,6 +604,20 @@ ${userBlock}`;
     this.state.emit('beat_end', { beat: beatNum, phase, isMessage: true });
     this._isMessageBeat = false;
     this._beating = false;
+  }
+
+  _noteMarketSession(phase) {
+    if (phase !== 'market_close') return;
+    const date = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    this._marketSessionDates.add(date);
+  }
+
+  getCompletedMarketSessions() {
+    return this._marketSessionDates.size;
+  }
+
+  canAgentOverrideHeartbeat(force = false) {
+    return Boolean(force) || this.getCompletedMarketSessions() >= HEARTBEAT_OVERRIDE_WARMUP_SESSIONS;
   }
 
   _getHeartbeatSeconds() {
@@ -546,18 +639,17 @@ ${userBlock}`;
     }
     const phase = this.getCurrentPhaseFn();
     this.state.phase = phase;
-    // Agent-level overrides take priority, then global config, then hardcoded defaults
-    if (this._agentConfig?.heartbeatOverrides?.[phase]) {
-      return this._agentConfig.heartbeatOverrides[phase];
-    }
-    return this.getHeartbeatForPhase(this.sandboxId, phase) || PHASE_DEFAULTS[phase]?.seconds || 600;
+    // Settings are the operator baseline. Agent-specific defaults do not outrank them.
+    const configured = this.getHeartbeatForPhase(this.sandboxId, phase);
+    if (configured) return configured;
+    return this._agentConfig?.heartbeatOverrides?.[phase] || PHASE_DEFAULTS[phase]?.seconds || 600;
   }
 
   _scheduleNext() {
     if (!this.state.running) return;
     // Always clear any existing timer first to prevent dual timers
     if (this._timer) { clearTimeout(this._timer); this._timer = null; }
-    const seconds = this._getHeartbeatSeconds();
+    const seconds = getHeartbeatScheduleSeconds(this._getHeartbeatSeconds(), this.state.phase);
     this.state.heartbeatSeconds = seconds;
     this.state.nextBeatTime = new Date(Date.now() + seconds * 1000).toISOString();
     this.state.emit('schedule', { seconds, nextBeat: this.state.nextBeatTime, phase: this.state.phase });
@@ -583,6 +675,7 @@ ${userBlock}`;
     this.state.lastBeatTime = new Date().toISOString();
     const phase = this.getCurrentPhaseFn();
     this.state.phase = phase;
+    this._noteMarketSession(phase);
     const model = this.state.activeModel;
 
     this.state.emit('beat_start', { beat: beatNum, phase, time: this.state.lastBeatTime });
@@ -622,6 +715,7 @@ ${userBlock}`;
       await this._persistSession(effectiveSessionId, { mode: 'heartbeat' });
       await this._persistMessages(effectiveSessionId, [
         { role: 'assistant', kind: 'heartbeat', beat: beatNum, phase, toolCalls: result.toolCalls || 0, content: result.text || '' },
+        ...(result.toolEvents || []),
       ]);
 
       this._consecutiveErrors = 0; // clean beat clears any backoff
@@ -650,7 +744,10 @@ ${userBlock}`;
   /**
    * Run opencode as subprocess with MCP tools and stream JSON events
    */
-  _runClaude(prompt, model) {
+  async _runClaude(prompt, model) {
+    const isNewSession = !this._sessionId;
+    let priorContext = '';
+    if (isNewSession) priorContext = await this._priorContext();
     return new Promise((resolve, reject) => {
       const sessionEpoch = this._sessionEpoch;
       // OpenCode model format: anthropic/claude-sonnet-4-6
@@ -671,11 +768,10 @@ ${userBlock}`;
         args.push('--session', this._sessionId);
       }
 
-      // Only include system prompt on first beat (new session) — subsequent beats
-      // on the same session already have it in context, saving ~2000 tokens/beat
-      const isNewSession = !this._sessionId;
+      // Only include system prompt on first beat (new session) and rehydrate a
+      // compact, account-scoped context window after process restarts.
       const fullPrompt = isNewSession
-        ? `[SYSTEM INSTRUCTIONS - Follow these at all times]\n${this.systemPrompt}\n\n[END SYSTEM INSTRUCTIONS]\n\n${prompt}`
+        ? `[SYSTEM INSTRUCTIONS - Follow these at all times]\n${this.systemPrompt}\n\n[END SYSTEM INSTRUCTIONS]\n${priorContext}\n${prompt}`
         : prompt;
 
       if (!this._isMessageBeat) {
@@ -710,9 +806,12 @@ ${userBlock}`;
       let fullText = '';
       let toolCalls = 0;
       let sessionId = null;
+      const toolEvents = [];
       let buffer = '';
       let totalCost = 0;
       let totalTokens = 0;
+      let stderrText = '';
+      let timedOut = false;
 
       proc.stdout.on('data', (chunk) => {
         buffer += chunk.toString();
@@ -725,6 +824,7 @@ ${userBlock}`;
             const event = JSON.parse(line);
             this._handleOpenCodeEvent(event, {
               addToolCall: () => toolCalls++,
+              recordToolEvent: (event) => toolEvents.push(event),
               addText: (t) => { fullText += t; },
               setSession: (id) => { sessionId = id; },
               addCost: (c) => { totalCost += c; },
@@ -737,6 +837,7 @@ ${userBlock}`;
       proc.stderr.on('data', (chunk) => {
         const msg = chunk.toString().trim();
         if (msg) {
+          stderrText = `${stderrText}${msg}\n`.slice(-2000);
           this.state.emit('agent_log', { message: `[opencode] ${msg}`, level: 'info' });
         }
       });
@@ -756,6 +857,7 @@ ${userBlock}`;
             const event = JSON.parse(buffer);
             this._handleOpenCodeEvent(event, {
               addToolCall: () => toolCalls++,
+              recordToolEvent: (event) => toolEvents.push(event),
               addText: (t) => { fullText += t; },
               setSession: (id) => { sessionId = id; },
               addCost: (c) => { totalCost += c; },
@@ -777,7 +879,7 @@ ${userBlock}`;
             message: `Beat interrupted by user (collected ${fullText.length} chars, ${toolCalls} tools before interrupt)`,
             level: 'warning',
           });
-          resolve({ text: fullText, toolCalls, sessionId, interrupted: true, sessionEpoch });
+          resolve({ text: fullText, toolCalls, toolEvents, sessionId, interrupted: true, sessionEpoch });
           return;
         }
 
@@ -786,19 +888,22 @@ ${userBlock}`;
           level: code === 0 ? 'info' : 'warning',
         });
 
-        if (code !== 0 && code !== null && !fullText) {
-          resolve({ error: `opencode exited with code ${code} signal ${signal}`, text: fullText, toolCalls, sessionId, sessionEpoch });
+        if (timedOut && !fullText) {
+          resolve({ error: `opencode timed out after ${BEAT_TIMEOUT_MS / 1000}s; harness sent SIGTERM${stderrText ? `: ${stderrText.trim()}` : ''}`, text: fullText, toolCalls, toolEvents, sessionId, sessionEpoch });
+        } else if (code !== 0 && code !== null && !fullText) {
+          resolve({ error: `opencode exited with code ${code} signal ${signal}${stderrText ? `: ${stderrText.trim()}` : ''}`, text: fullText, toolCalls, toolEvents, sessionId, sessionEpoch });
         } else if (signal && !fullText) {
-          resolve({ error: `opencode killed by ${signal}`, text: fullText, toolCalls, sessionId, sessionEpoch });
+          resolve({ error: `opencode killed by ${signal}`, text: fullText, toolCalls, toolEvents, sessionId, sessionEpoch });
         } else {
-          resolve({ text: fullText, toolCalls, sessionId, sessionEpoch });
+          resolve({ text: fullText, toolCalls, toolEvents, sessionId, sessionEpoch });
         }
       });
 
       // Safety timeout - 5 minutes max per beat
       this._beatTimeout = setTimeout(() => {
         if (proc && !proc.killed) {
-          this.state.emit('agent_log', { message: 'Beat timed out (5 min max), killing process.', level: 'warning' });
+          timedOut = true;
+          this.state.emit('agent_log', { message: `Beat timed out (${BEAT_TIMEOUT_MS / 1000}s max), killing process with SIGTERM.`, level: 'warning' });
           proc.kill('SIGTERM');
           // Escalate to SIGKILL if the process ignores SIGTERM (otherwise the beat hangs forever).
           setTimeout(() => {
@@ -852,19 +957,18 @@ ${userBlock}`;
 
         // Emit tool result
         const resultStr = typeof toolOutput === 'string' ? toolOutput : JSON.stringify(toolOutput);
+        ctx.recordToolEvent?.({
+          eventType: 'tool_call', kind: 'tool_call', role: 'assistant',
+          tool: toolName, args: toolInput, result: resultStr?.substring(0, 1200), beat: beatNum,
+        });
         this.state.emit('tool_result', { name: toolName, result: resultStr.substring(0, 500), beat: beatNum });
 
-        // Track trades
-        if (fullToolName.includes('buy') || fullToolName.includes('sell') || fullToolName.includes('order') || fullToolName.includes('managed')) {
+        // Track only tools that execute trades. Read-only tools such as
+        // get_orders and get_managed_positions must not inflate trade telemetry.
+        const trade = tradeEventFromToolUse(fullToolName, toolInput);
+        if (trade) {
           this.state.stats.trades++;
-          this.state.addTrade({
-            type: 'order',
-            tool: toolName,
-            symbol: toolInput.symbol || '??',
-            side: toolInput.side || (fullToolName.includes('buy') ? 'buy' : 'sell'),
-            quantity: toolInput.quantity || toolInput.qty,
-            price: toolInput.limit_price,
-          });
+          this.state.addTrade(trade);
         }
         break;
       }

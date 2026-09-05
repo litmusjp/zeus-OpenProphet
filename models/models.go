@@ -11,7 +11,7 @@ type DBOrder struct {
 	gorm.Model
 	OrderID        string  `gorm:"index"`
 	ClientOrderID  *string `gorm:"uniqueIndex"` // pointer so empty stays NULL — many NULLs allowed, only non-empty ids dedupe
-	Symbol         string `gorm:"index"`
+	Symbol         string  `gorm:"index"`
 	Qty            float64
 	Side           string
 	Type           string
@@ -32,7 +32,7 @@ type DBOrder struct {
 // DBBar represents historical price data in the database
 type DBBar struct {
 	gorm.Model
-	Symbol    string `gorm:"index:idx_symbol_timestamp"`
+	Symbol    string    `gorm:"index:idx_symbol_timestamp"`
 	Timestamp time.Time `gorm:"index:idx_symbol_timestamp"`
 	Open      float64
 	High      float64
@@ -46,7 +46,7 @@ type DBBar struct {
 // DBPosition represents a position snapshot in the database
 type DBPosition struct {
 	gorm.Model
-	Symbol         string `gorm:"uniqueIndex"`
+	Symbol         string `gorm:"index:idx_position_symbol_snapshot"`
 	Qty            float64
 	AvgEntryPrice  float64
 	MarketValue    float64
@@ -55,7 +55,7 @@ type DBPosition struct {
 	UnrealizedPLPC float64
 	CurrentPrice   float64
 	Side           string
-	SnapshotTime   time.Time `gorm:"index"`
+	SnapshotTime   time.Time `gorm:"index:idx_position_symbol_snapshot"`
 }
 
 // DBTrade represents executed trades for analysis
@@ -103,10 +103,10 @@ type DBSignal struct {
 // DBManagedPosition represents a managed position with automated risk management
 type DBManagedPosition struct {
 	gorm.Model
-	PositionID        string `gorm:"uniqueIndex"`
-	Symbol            string `gorm:"index"`
-	Side              string
-	Strategy          string
+	PositionID string `gorm:"uniqueIndex"`
+	Symbol     string `gorm:"index"`
+	Side       string
+	Strategy   string
 
 	// Entry details
 	Quantity          float64
@@ -116,11 +116,11 @@ type DBManagedPosition struct {
 	AllocationDollars float64
 
 	// Risk management
-	StopLossPrice     float64
-	StopLossPercent   float64
-	StopLossOrderID   string
-	TrailingStop      bool
-	TrailingPercent   float64
+	StopLossPrice   float64
+	StopLossPercent float64
+	StopLossOrderID string
+	TrailingStop    bool
+	TrailingPercent float64
 
 	// Profit targets
 	TakeProfitPrice   float64
@@ -128,23 +128,23 @@ type DBManagedPosition struct {
 	TakeProfitOrderID string
 
 	// Partial exit
-	PartialExitEnabled      bool
-	PartialExitPercent      float64
+	PartialExitEnabled       bool
+	PartialExitPercent       float64
 	PartialExitTargetPercent float64
 	PartialExitTargetPrice   float64
-	PartialExitOrders       string // JSON array of order IDs
+	PartialExitOrders        string // JSON array of order IDs
 
 	// Status
-	Status           string `gorm:"index"` // PENDING, ACTIVE, PARTIAL, CLOSED, STOPPED_OUT
-	CurrentPrice     float64
-	UnrealizedPL     float64
-	UnrealizedPLPC   float64
-	RemainingQty     float64
+	Status         string `gorm:"index"` // PENDING, ACTIVE, PARTIAL, CLOSED, STOPPED_OUT
+	CurrentPrice   float64
+	UnrealizedPL   float64
+	UnrealizedPLPC float64
+	RemainingQty   float64
 
 	// Metadata
-	Notes     string
-	Tags      string // JSON array
-	ClosedAt  *time.Time
+	Notes    string
+	Tags     string // JSON array
+	ClosedAt *time.Time
 }
 
 // TableName overrides for cleaner table names

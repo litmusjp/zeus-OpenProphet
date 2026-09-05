@@ -446,6 +446,27 @@
     .trade-card .trade-side.sell { color: var(--error); }
     .trade-card .trade-details { font-size: 12px; color: var(--ink-muted); margin-top: 4px; }
     .trade-card .trade-time { font-size: 11px; color: var(--ink-faint); font-family: 'IBM Plex Mono', monospace; }
+    .trade-analytics-card { border: 1px solid var(--rule); background: var(--paper); padding: 14px; margin-bottom: 18px; }
+    .trade-chart-toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+    .trade-chart-controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:11px; color:var(--ink-muted); }
+    .trade-chart-controls select { margin-left:4px; padding:4px 7px; border:1px solid var(--rule); background:var(--paper); color:var(--ink); border-radius:3px; font-size:11px; }
+    .trade-account-toggle { display:flex; align-items:center; gap:4px; white-space:nowrap; cursor:pointer; }
+    .trade-account-toggle input { accent-color:var(--accent); }
+    .trade-chart-legend { display:flex; gap:16px; font-size:11px; color:var(--ink-muted); }
+
+    .legend-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; }
+    .legend-dot.litmus1 { background:#4f8cff; } .legend-dot.litmus2 { background:#c084fc; }
+    .trade-chart-summary { font-size:12px; color:var(--ink-muted); margin:12px 0 4px; }
+    .trade-chart-wrap { position:relative; overflow-x:auto; }
+    #trade-chart { display:block; width:100%; min-width:620px; height:300px; }
+    #trade-chart .chart-grid { stroke:var(--rule-light); stroke-width:1; }
+    #trade-chart .chart-axis { stroke:var(--rule); stroke-width:1; }
+    #trade-chart .chart-label { fill:var(--ink-faint); font:10px 'IBM Plex Mono',monospace; }
+    #trade-chart .trade-bar { cursor:pointer; opacity:.88; }
+    #trade-chart .trade-bar:hover, #trade-chart .trade-bar:focus { opacity:1; stroke:var(--ink); stroke-width:1.5; }
+    .trade-chart-tooltip { position:absolute; pointer-events:none; z-index:2; padding:8px 10px; background:var(--bg-dark); color:var(--text); border:1px solid var(--border); border-radius:4px; font-size:11px; line-height:1.5; box-shadow:0 3px 12px rgba(0,0,0,.2); }
+    .trade-section-heading { display:flex; justify-content:space-between; align-items:center; font-size:12px; font-weight:700; color:var(--ink); margin:12px 0 8px; }
+    .trade-ledger-status { font-size:10px; font-weight:400; color:var(--ink-faint); }
 
     /* ── Modal ───────────────────────────── */
     .modal-overlay {
@@ -576,7 +597,20 @@
       background: var(--success-bg); border: 1px solid var(--success); border-radius: 4px; font-size: 13px;
     }
     .review-activate input { width: auto; margin-top: 2px; }
-    .review-note { margin-top: 16px; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 4px; font-size: 12px; color: var(--ink-muted); background: var(--paper); }
+    .operator-status-card {
+      display:flex; flex-direction:column; gap:5px; min-width:300px; max-width:560px;
+      padding:7px 10px; border:1px solid var(--rule); border-radius:7px; background:var(--paper-dark);
+      font-size:11px; line-height:1.35;
+    }
+    .operator-status-main, .operator-status-details { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .operator-mode-badge { color:var(--warning); border:1px solid var(--warning); border-radius:3px; padding:1px 4px; font-size:9px; letter-spacing:.06em; }
+    .operator-mode-badge.live { color:var(--danger); border-color:var(--danger); }
+    .operator-mode-badge.unknown { color:var(--warning); border-color:var(--warning); }
+    .operator-attention { color:var(--success); margin-left:auto; }
+    .operator-attention.has-attention { color:var(--warning); }
+    .operator-status-details { color:var(--ink-muted); }
+    .operator-status-details b { color:var(--ink); font-weight:500; }
+    .operator-last-action { color:var(--ink-faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
     /* ── Footer Bar ─────────────────────── */
     .footer {
@@ -601,8 +635,9 @@
       .clock { display: none; }
       .phase-badge { font-size: 9px; padding: 2px 6px; }
       
-      /* Hide sandbox selector on mobile - use tabs instead */
-      .topbar-right > div:first-child { display: none; }
+      /* The status card and controls remain visible on mobile. */
+      .operator-status-card { min-width: 0; width: 100%; order: 3; }
+      .control-console { width: 100%; order: 4; }
       
       .sidebar { display: none; }
       .terminal-split { flex-direction: column; }
@@ -682,6 +717,21 @@
       <select id="sandbox-selector" style="display:none"></select>
       <span id="sandbox-status-badge" style="display:none"></span>
       <span class="clock" id="clock"></span>
+      <div class="operator-status-card" id="operator-status-card" aria-live="polite">
+        <div class="operator-status-main">
+          <span class="operator-mode-badge" id="operator-mode-badge">PAPER</span>
+          <strong id="operator-account-name">--</strong>
+          <span class="operator-attention" id="operator-attention">No attention items</span>
+        </div>
+        <div class="operator-status-details">
+          <span>Agent <b id="operator-agent-name">--</b></span>
+          <span>Model <b id="operator-model-name">--</b></span>
+          <span>Phase <b id="operator-phase">--</b></span>
+          <span>Heartbeat <b id="operator-heartbeat">--</b></span>
+          <span>Next <b id="operator-next-heartbeat">--</b></span>
+        </div>
+        <div class="operator-last-action" id="operator-last-action">Last broker-confirmed action: none recorded</div>
+      </div>
       <div class="control-console" title="Start/Pause/Stop act on this account's sandbox">
         <div class="cc-account">
           <span class="cc-account-label">Controlling</span>
@@ -730,9 +780,24 @@
     <!-- Trades Panel -->
     <div class="panel" id="panel-trades">
       <div class="settings-content">
-        <h2>Live Trades</h2>
-        <p class="subtitle">Real-time order activity from the agent</p>
-        <div id="trades-feed"><div class="no-data">No trades yet. Start the agent to see live activity.</div></div>
+        <h2>Trades &amp; P/L</h2>
+        <p class="subtitle">Broker-confirmed fills only. Tool-call attempts and unfilled orders are excluded from realized P/L.</p>
+        <div class="trade-analytics-card">
+          <div class="trade-chart-toolbar">
+            <div class="trade-chart-controls">
+              <label>Range <select id="trade-range" onchange="updateTradeChart()"><option value="all">Since trading began</option><option value="7d">Past week</option><option value="1d">Last trading day</option></select></label>
+              <label>View <select id="trade-mode" onchange="updateTradeChart()"><option value="timeseries">Time-series</option><option value="cumulative">Cumulative P/L</option></select></label>
+              <label class="trade-account-toggle"><input type="checkbox" value="Litmus1" checked onchange="updateTradeChart()"> Litmus 1</label>
+              <label class="trade-account-toggle"><input type="checkbox" value="Litmus2" checked onchange="updateTradeChart()"> Litmus 2</label>
+            </div>
+            <button class="btn sm" onclick="loadVerifiedTrades()">Refresh</button>
+          </div>
+          <div id="trade-chart-summary" class="trade-chart-summary">Loading verified fills...</div>
+          <div class="trade-chart-wrap"><svg id="trade-chart" viewBox="0 0 900 300" role="img" aria-label="Realized profit and loss by trade over time"></svg><div id="trade-chart-tooltip" class="trade-chart-tooltip" hidden></div></div>
+          <div id="trade-chart-empty" class="no-data" hidden>No realized fills yet. Open and close paper positions to populate the chart.</div>
+        </div>
+        <div class="trade-section-heading"><span>Verified Trade History</span><span id="trade-ledger-status" class="trade-ledger-status"></span></div>
+        <div id="trades-feed"><div class="no-data">Loading verified trades...</div></div>
       </div>
     </div>
 
@@ -889,12 +954,12 @@
           <p style="font-size:13px;color:var(--ink-muted);margin-bottom:12px">Seconds between agent heartbeats per market phase</p>
           <div class="config-card">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px" id="heartbeat-grid">
-              <div class="form-group"><label>Pre-Market</label><input type="number" id="hb-pre_market" min="30" max="3600" onchange="saveHeartbeat()"></div>
-              <div class="form-group"><label>Market Open</label><input type="number" id="hb-market_open" min="30" max="3600" onchange="saveHeartbeat()"></div>
-              <div class="form-group"><label>Midday</label><input type="number" id="hb-midday" min="30" max="3600" onchange="saveHeartbeat()"></div>
-              <div class="form-group"><label>Market Close</label><input type="number" id="hb-market_close" min="30" max="3600" onchange="saveHeartbeat()"></div>
-              <div class="form-group"><label>After Hours</label><input type="number" id="hb-after_hours" min="60" max="7200" onchange="saveHeartbeat()"></div>
-              <div class="form-group"><label>Closed</label><input type="number" id="hb-closed" min="60" max="7200" onchange="saveHeartbeat()"></div>
+              <div class="form-group"><label>Pre-Market</label><input type="number" id="hb-pre_market" min="30" max="14400" onchange="saveHeartbeat()"></div>
+              <div class="form-group"><label>Market Open</label><input type="number" id="hb-market_open" min="30" max="14400" onchange="saveHeartbeat()"></div>
+              <div class="form-group"><label>Midday</label><input type="number" id="hb-midday" min="30" max="14400" onchange="saveHeartbeat()"></div>
+              <div class="form-group"><label>Market Close</label><input type="number" id="hb-market_close" min="30" max="14400" onchange="saveHeartbeat()"></div>
+              <div class="form-group"><label>After Hours</label><input type="number" id="hb-after_hours" min="60" max="14400" onchange="saveHeartbeat()"></div>
+              <div class="form-group"><label>Closed</label><input type="number" id="hb-closed" min="60" max="14400" onchange="saveHeartbeat()"></div>
             </div>
             <div class="form-hint">Agent can override these dynamically via set_heartbeat tool. Values in seconds.</div>
           </div>
@@ -927,6 +992,7 @@
               <input type="text" id="perm-blocked" placeholder="e.g. place_order, close_position" onchange="savePermissions()">
               <div class="form-hint">Leave empty to allow all tools. Block specific tools by name.</div>
             </div>
+            <div id="tool-descriptions" style="margin-top:16px"></div>
           </div>
         </div>
 
@@ -1087,7 +1153,7 @@
     </div>
     <div class="footer-right">
       <span>Override:</span>
-      <input type="number" id="hb-override" placeholder="sec" min="30" max="3600">
+      <input type="number" id="hb-override" placeholder="sec" min="30" max="14400">
       <button class="btn sm" onclick="overrideHeartbeat()">Set</button>
     </div>
   </div>
@@ -1173,6 +1239,7 @@ function switchTab(id) {
   const panel = document.getElementById('panel-' + id);
   if (panel) panel.classList.add('active');
   if (id === 'history' && !historyState.loaded) loadHistoryPanel();
+  if (id === 'trades') loadVerifiedTrades();
 }
 
 async function refreshSelectedSandboxView() {
@@ -1379,6 +1446,7 @@ function connectSSE() {
     const sid = d.sandboxId || getEffectiveSandboxId();
     logToSandbox(sid, `<div class="log-entry info"><span class="time">${fmtTime()}</span><span style="color:var(--ink-faint)"> -> ${esc(d.name)}: ${esc(d.result.substring(0,200))}</span></div>`);
     logHtml('<span style="color:var(--ink-faint)">  -> ' + esc(formatSandboxPrefix(d) + d.name) + ': ' + esc(d.result.substring(0,200)) + '</span>', 'info');
+    noteBrokerAction(d);
   });
   es.addEventListener('heartbeat_change', e => {
     const d = JSON.parse(e.data);
@@ -1444,6 +1512,36 @@ function connectSSE() {
 function _set(id, val) { const e = document.getElementById(id); if(e) e.textContent = val; }
 function _setData(key, val) { const e = document.querySelector(`[data-stat="${key}"]`); if(e) e.textContent = val; }
 
+function updateOperatorCard(s) {
+  const sid = s?.sandboxId || getEffectiveSandboxId();
+  if (!sid) return;
+  const sandbox = config?.sandboxes?.[sid] || {};
+  const account = (config?.accounts || []).find(a => a.id === sandbox.accountId);
+  const agent = (config?.agents || []).find(a => a.id === (s.activeAgentId || sandbox.agent?.activeAgentId));
+  const labels = { pre_market:'Pre-Market', market_open:'Market Open', midday:'Midday', market_close:'Market Close', after_hours:'After Hours', closed:'Closed' };
+  const isPaper = account ? account.paper !== false : null;
+  const modeBadge = document.getElementById('operator-mode-badge');
+  if (modeBadge) { modeBadge.textContent = isPaper === null ? 'UNKNOWN' : (isPaper ? 'PAPER' : 'LIVE'); modeBadge.classList.toggle('live', isPaper === false); modeBadge.classList.toggle('unknown', isPaper === null); }
+  _set('operator-account-name', account?.name || sandbox.name || '--');
+  _set('operator-agent-name', agent?.name || sandbox.agent?.activeAgentId || '--');
+  _set('operator-model-name', (s.activeModel || sandbox.agent?.model || '--').replace('opencode/', ''));
+  _set('operator-phase', labels[s.phase] || s.phase || '--');
+  _set('operator-heartbeat', s.heartbeatSeconds ? fmtInt(s.heartbeatSeconds) : '--');
+  const next = s.nextBeat ? new Date(s.nextBeat) : nextBeatTime;
+  _set('operator-next-heartbeat', next instanceof Date && !Number.isNaN(next.getTime()) ? Math.max(0, Math.ceil((next - Date.now()) / 1000)) + 's' : '--');
+  const attention = document.getElementById('operator-attention');
+  const count = Number(s.stats?.errors || 0);
+  if (attention) { attention.textContent = count ? `${count} attention item${count === 1 ? '' : 's'}` : 'No attention items'; attention.classList.toggle('has-attention', count > 0); }
+}
+
+function noteBrokerAction(d) {
+  if (!d?.name || (d.sandboxId && d.sandboxId !== getEffectiveSandboxId()) || !/^(place_|submit_)/.test(d.name)) return;
+  const result = String(d.result || '');
+  if (!/(?:accepted|submitted|pending|filled|partially[_ ]filled)/i.test(result)) return;
+  const el = document.getElementById('operator-last-action');
+  if (el) el.textContent = 'Last broker-confirmed action: ' + d.name.replace(/^place_/, '').replaceAll('_', ' ') + ' (' + new Date().toLocaleTimeString() + ')';
+}
+
 function updateState(s) {
   const sid = s?.sandboxId || getEffectiveSandboxId();
   
@@ -1465,6 +1563,7 @@ function updateState(s) {
   _set('stat-trades', s.stats?.trades || 0);
   _set('stat-errors', s.stats?.errors || 0);
   _set('hb-interval', fmtInt(s.heartbeatSeconds));
+  updateOperatorCard(s);
   _set('footer-model', (s.activeModel || '--').replace('claude-', '').split('-202')[0]);
   updatePhase(s.phase);
   updateButtons(s.running ? (s.paused ? 'paused' : 'started') : 'stopped');
@@ -1512,6 +1611,7 @@ function startProgress() {
     const pct = Math.max(0, Math.min(100, ((heartbeatSeconds*1000 - rem)/(heartbeatSeconds*1000))*100));
     const fillEl = document.getElementById('hb-fill'); if(fillEl) fillEl.style.width = pct + '%';
     _set('hb-next', Math.max(0, Math.ceil(rem/1000)) + 's');
+    _set('operator-next-heartbeat', Math.max(0, Math.ceil(rem/1000)) + 's');
   }, 1000);
 }
 
@@ -1521,7 +1621,21 @@ async function startAgent() {
   btn.textContent = 'Starting...'; btn.disabled = true;
   try {
     const sid = getEffectiveSandboxId();
-    if (!sid) { log('No sandbox selected', 'error'); return; }
+    if (!sid) { log('No sandbox selected', 'error'); btn.textContent = 'Start'; btn.disabled = false; return; }
+  const account = (config?.accounts || []).find(a => a.id === (config?.sandboxes?.[sid]?.accountId));
+    const sandbox = config?.sandboxes?.[sid] || {};
+    const agent = (config?.agents || []).find(a => a.id === sandbox.agent?.activeAgentId);
+    const mode = account ? (account.paper !== false ? 'PAPER' : 'LIVE') : 'UNKNOWN';
+    const model = sandbox.agent?.model || '--';
+    if (!account) {
+      btn.textContent = 'Start'; btn.disabled = false;
+      showToast('Start blocked: account identity could not be verified.', 'error');
+      return;
+    }
+    if (!confirm(`Start ${account?.name || sandbox.name || 'this account'}?\n\nMode: ${mode}\nAgent: ${agent?.name || sandbox.agent?.activeAgentId || '--'}\nModel: ${model}\n\nStart begins autonomous heartbeats. Existing broker orders are not changed.`)) {
+      btn.textContent = 'Start'; btn.disabled = false;
+      return;
+    }
     const r = await fetch('/api/sandboxes/' + encodeURIComponent(sid) + '/start', {method:'POST'});
     const d = await r.json();
     if (!d.ok && d.error) {
@@ -1579,7 +1693,7 @@ function refreshSandboxButtons() {
 }
 async function overrideHeartbeat() {
   const v = parseInt(document.getElementById('hb-override').value);
-  if(!v||v<30||v>3600) return;
+  if(!v||v<30||v>14400) return;
   const sid = getEffectiveSandboxId();
   const body = { seconds: v };
   if (sid) body.sandboxId = sid;
@@ -1606,16 +1720,26 @@ async function loadHistoryPanel() {
 }
 
 async function openChatSession(sessionId, accountId) {
+  const transcript = document.getElementById('history-transcript');
+  const title = document.getElementById('history-session-title');
+  if (transcript) transcript.innerHTML = '<div class="log-entry info"><span class="time">--:--:--</span>Loading session transcript...</div>';
+  if (title) title.textContent = 'Loading transcript...';
   try {
+    const sessionMeta = historyState.chatSessions.find(s => s.id === sessionId);
+    accountId = accountId || sessionMeta?.accountId || sessionMeta?.metadata?.accountId;
+    if (!accountId) throw new Error('This session has no account identifier');
     const r = await fetch('/api/chats/' + encodeURIComponent(sessionId) + '?accountId=' + encodeURIComponent(accountId));
     const data = await r.json();
-    if (data.error) throw new Error(data.error);
+    if (!r.ok || data.error) throw new Error(data.error || 'HTTP ' + r.status);
     historyState.selectedChatId = sessionId;
     historyState.chatMessages = data.messages || [];
     renderHistorySessions();
     renderHistoryTranscript(data.session, data.messages || []);
+    document.getElementById('history-transcript')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (e) {
-    log('Chat load failed: ' + e.message, 'error');
+    if (title) title.textContent = 'Transcript unavailable';
+    if (transcript) transcript.innerHTML = '<div class="log-entry error"><span class="time">--:--:--</span>' + esc('Chat load failed: ' + e.message) + '</div>';
+    if (typeof showToast === 'function') showToast('Chat load failed: ' + e.message, 'error');
   }
 }
 
@@ -1651,8 +1775,10 @@ function renderHistorySessions() {
   el.innerHTML = historyState.chatSessions.map(s => {
     const selected = s.id === historyState.selectedChatId;
     const when = s.lastActiveAt ? new Date(s.lastActiveAt).toLocaleString() : '--';
-    const agentName = s.metadata?.agentName || s.metadata?.agentId || '--';
-    return '<div class="config-card' + (selected ? ' active-card' : '') + '"><div class="config-card-header"><span class="config-card-title">' + esc(agentName) + '</span><span class="badge paper">' + esc(s.accountId || '--') + '</span></div><div class="config-card-meta">Session: ' + esc(s.id) + '</div><div class="config-card-desc">' + esc(s.lastMessage || 'No preview available') + '</div><div class="config-card-meta">Messages: ' + esc(String(s.messageCount || 0)) + ' | Last active: ' + esc(when) + '</div><div class="config-card-actions"><button class="btn sm" onclick="openChatSession(\'' + s.id + '\', \'' + s.accountId + '\')">Open</button></div></div>';
+    const agentName = s.metadata?.agentName || s.metadata?.agentId || (s.metadata?.mode === 'manager' ? 'Manager' : '--');
+    const accountName = s.accountName || s.metadata?.accountName || s.accountId || '--';
+    const sandboxName = s.sandboxName || s.metadata?.sandboxName || s.metadata?.sandboxId || '--';
+    return '<div class="config-card' + (selected ? ' active-card' : '') + '"><div class="config-card-header"><span class="config-card-title">' + esc(agentName) + '</span><span class="badge paper">' + esc(accountName) + '</span></div><div class="config-card-meta">Sandbox: ' + esc(sandboxName) + ' | Session: ' + esc(s.id) + '</div><div class="config-card-desc">' + esc(s.lastMessage || 'No preview available') + '</div><div class="config-card-meta">Messages: ' + esc(String(s.messageCount || 0)) + ' | Last active: ' + esc(when) + '</div><div class="config-card-actions"><button class="btn sm" onclick="openChatSession(\'' + s.id + '\', \'' + s.accountId + '\'); return false;">Open</button></div></div>';
   }).join('');
 }
 
@@ -1815,24 +1941,227 @@ function clearPortfolioView(sid) {
   }
 }
 
-// ── Trade feed ─────────────────────────────
-function addTradeCard(trade) {
-  const feed = document.getElementById('trades-feed');
-  if(feed.querySelector('.no-data')) feed.innerHTML = '';
-  const card = document.createElement('div');
-  card.className = 'trade-card';
-  const t = trade.timestamp ? new Date(trade.timestamp).toLocaleTimeString('en-US',{hour12:false}) : '--';
-  card.innerHTML = '<div class="trade-header"><span class="trade-symbol">' + esc(trade.symbol||'??') + '</span><span class="trade-side ' + (trade.side||'') + '">' + esc(trade.side||'--') + '</span></div><div class="trade-details">' + esc(trade.tool||'') + (trade.quantity?' | Qty: '+trade.quantity:'') + (trade.price?' | $'+trade.price:'') + '</div><div class="trade-time">' + t + '</div>';
-  feed.insertBefore(card, feed.firstChild);
-  while(feed.children.length > 50) feed.removeChild(feed.lastChild);
+// ── Verified trade ledger and chart ─────────
+let verifiedTrades = [];
+let verifiedOrders = [];
+let verifiedTradesLoading = false;
+
+function fmtPnl(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return 'P/L pending';
+  const n = Number(value);
+  return (n >= 0 ? '+' : '') + '$' + n.toFixed(2);
 }
+
+function clearTradeFeed() {
+  const feed = document.getElementById('trades-feed');
+  if (feed) feed.innerHTML = '';
+  return feed;
+}
+
+function renderVerifiedTradeFeed() {
+  const feed = clearTradeFeed();
+  const filled = verifiedOrders.filter(o => !['submit_failed','canceled','cancelled','rejected','expired'].includes(String(o.Status || o.status || '').toLowerCase()));
+  if (!filled.length) {
+    feed.innerHTML = '<div class="no-data">No broker-confirmed fills yet.</div>';
+    return;
+  }
+  const realizedByOrder = new Map();
+  verifiedTrades.forEach(t => realizedByOrder.set(t.orderId, t));
+  filled.sort((a,b) => new Date(b.FilledAt || b.SubmittedAt || b.filledAt || b.submittedAt || 0) - new Date(a.FilledAt || a.SubmittedAt || a.filledAt || a.submittedAt || 0));
+  filled.slice(0, 100).forEach(order => {
+    const side = String(order.Side || order.side || '').toLowerCase();
+    const price = Number(order.FilledAvgPrice ?? order.filledAvgPrice);
+    const quantity = Number(order.FilledQty ?? order.filledQty);
+    const time = order.FilledAt || order.SubmittedAt || order.filledAt || order.submittedAt;
+    const trade = realizedByOrder.get(order.ID || order.id);
+    const card = document.createElement('div');
+    card.className = 'trade-card';
+    const header = document.createElement('div'); header.className = 'trade-header';
+    const symbol = document.createElement('span'); symbol.className = 'trade-symbol'; symbol.textContent = order.Symbol || order.symbol || '??';
+    const sideEl = document.createElement('span'); sideEl.className = 'trade-side ' + side; sideEl.textContent = side || '--';
+    header.append(symbol, sideEl); card.appendChild(header);
+    const details = document.createElement('div'); details.className = 'trade-details';
+    details.textContent = `${order.accountName || 'Unknown account'} / ${order.agentName || 'Unassigned'} | ${quantity || '?'} @ ${Number.isFinite(price) ? '$' + price.toFixed(2) : 'price pending'} | ${trade ? fmtPnl(trade.pnl) : 'P/L pending'}`;
+    const stamp = document.createElement('div'); stamp.className = 'trade-time'; stamp.textContent = time ? new Date(time).toLocaleString() : '--';
+    card.append(details, stamp); feed.appendChild(card);
+  });
+}
+
+function renderTradeChart() {
+  const svg = document.getElementById('trade-chart');
+  const empty = document.getElementById('trade-chart-empty');
+  if (!svg) return;
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const data = verifiedTrades.filter(t => Number.isFinite(Number(t.pnl))).sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+  empty.hidden = data.length > 0;
+  if (!data.length) return;
+  const W=900, H=300, left=58, right=18, top=18, bottom=38, plotW=W-left-right, plotH=H-top-bottom;
+  const maxAbs=Math.max(1, ...data.map(t => Math.abs(Number(t.pnl))));
+  const zero=top+plotH/2;
+  const y=v => zero-(Number(v)/maxAbs)*(plotH/2-.5);
+  const ns='http://www.w3.org/2000/svg';
+  const make=(tag,attrs={})=>{const n=document.createElementNS(ns,tag);Object.entries(attrs).forEach(([k,v])=>n.setAttribute(k,v));return n;};
+  [top,zero,H-bottom].forEach(v=>svg.appendChild(make('line',{x1:left,y1:v,x2:W-right,y2:v,class:'chart-grid'})));
+  const yl=make('text',{x:left-8,y:top+4,'text-anchor':'end',class:'chart-label'}); yl.textContent='+'+fmtPnl(maxAbs); svg.appendChild(yl);
+  const zl=make('text',{x:left-8,y:zero+4,'text-anchor':'end',class:'chart-label'}); zl.textContent='$0'; svg.appendChild(zl);
+  const nl=make('text',{x:left-8,y:H-bottom+4,'text-anchor':'end',class:'chart-label'}); nl.textContent=fmtPnl(-maxAbs); svg.appendChild(nl);
+  svg.appendChild(make('line',{x1:left,y1:zero,x2:W-right,y2:zero,class:'chart-axis'}));
+  const gap=Math.max(2,Math.min(10,plotW/data.length*.2)), barW=Math.max(4,(plotW/data.length)-gap);
+  data.forEach((t,i)=>{
+    const val=Number(t.pnl), x=left+i*(plotW/data.length)+(gap/2), yy=val>=0?y(val):zero, h=Math.max(2,Math.abs(y(val)-zero));
+    const bar=make('rect',{x,y:yy,width:barW,height:h,rx:2,class:'trade-bar',fill:(t.accountId||'').endsWith('4caa9897')||String(t.accountName||'').toLowerCase().includes('1')?'#4f8cff':'#c084fc','tabindex':'0'});
+    const tip=`${t.accountName || 'Unknown account'} / ${t.agentName || 'Unassigned'}\n${t.symbol}\n${fmtPnl(val)}\n${new Date(t.timestamp).toLocaleString()}`;
+    bar.addEventListener('mouseenter',e=>showTradeTooltip(e,tip)); bar.addEventListener('focus',e=>showTradeTooltip(e,tip)); bar.addEventListener('mouseleave',hideTradeTooltip); bar.addEventListener('blur',hideTradeTooltip);
+    svg.appendChild(bar);
+  });
+}
+function selectedTradeAccounts() {
+  return new Set([...document.querySelectorAll('.trade-account-toggle input:checked')].map(input => input.value));
+}
+function filteredVerifiedTrades() {
+  const accounts = selectedTradeAccounts();
+  const range = document.getElementById('trade-range')?.value || 'all';
+  const data = verifiedTrades.filter(t => Number.isFinite(Number(t.pnl)) && accounts.has(t.accountName));
+  if (range === 'all' || !data.length) return data;
+  const latest = Math.max(...data.map(t => new Date(t.timestamp || t.exitTime || t.entryTime).getTime()));
+  const cutoff = latest - (range === '7d' ? 7 : 1) * 86400000;
+  return data.filter(t => new Date(t.timestamp || t.exitTime || t.entryTime).getTime() >= cutoff);
+}
+function updateTradeChart() { renderTradeChart(); }
+function renderTradeChart() {
+  const svg = document.getElementById('trade-chart'), empty = document.getElementById('trade-chart-empty');
+  if (!svg) return;
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const data = filteredVerifiedTrades().sort((a,b) => new Date(a.timestamp || a.exitTime || a.entryTime) - new Date(b.timestamp || b.exitTime || b.entryTime));
+  empty.hidden = data.length > 0;
+  if (!data.length) return;
+  const mode = document.getElementById('trade-mode')?.value || 'timeseries';
+  const W=900,H=300,left=72,right=18,top=18,bottom=48,plotW=W-left-right,plotH=H-top-bottom;
+  const selected = selectedTradeAccounts();
+  const values = mode === 'cumulative' ? [...selected].map(a => data.filter(t=>t.accountName===a).reduce((s,t)=>s+Number(t.pnl||0),0)) : data.map(t=>Number(t.pnl));
+  const maxAbs=Math.max(1,...values.map(Math.abs)), zero=top+plotH/2, y=v=>zero-(Number(v)/maxAbs)*(plotH/2-.5), ns='http://www.w3.org/2000/svg';
+  const make=(tag,attrs={})=>{const n=document.createElementNS(ns,tag);Object.entries(attrs).forEach(([k,v])=>n.setAttribute(k,v));return n;};
+  [top,zero,H-bottom].forEach(v=>svg.appendChild(make('line',{x1:left,y1:v,x2:W-right,y2:v,class:'chart-grid'})));
+  const label=(x,y,text,anchor='end')=>{const n=make('text',{x,y,'text-anchor':anchor,class:'chart-label'});n.textContent=text;svg.appendChild(n);};
+  label(left-8,top+4,'+'+fmtPnl(maxAbs)); label(left-8,zero+4,'$0'); label(left-8,H-bottom+4,fmtPnl(-maxAbs)); svg.appendChild(make('line',{x1:left,y1:zero,x2:W-right,y2:zero,class:'chart-axis'}));
+  const color=a=>String(a).toLowerCase().includes('1')?'#4f8cff':'#c084fc';
+  const bar=(value,x,width,account,tip,xText)=>{const yy=value>=0?y(value):zero,h=Math.max(2,Math.abs(y(value)-zero)),n=make('rect',{x,y:yy,width,height:h,rx:2,class:'trade-bar',fill:color(account),tabindex:'0','aria-label':tip}); n.addEventListener('mouseenter',e=>showTradeTooltip(e,tip)); n.addEventListener('focus',e=>showTradeTooltip(e,tip)); n.addEventListener('mouseleave',hideTradeTooltip); n.addEventListener('blur',hideTradeTooltip); svg.appendChild(n); label(Number(x)+Number(width)/2,H-bottom+16,xText,'middle');};
+  if(mode==='cumulative') { const accounts=[...selected].filter(a=>data.some(t=>t.accountName===a)),slot=plotW/Math.max(1,accounts.length),bw=Math.min(130,slot*.62); accounts.forEach((a,i)=>{const v=data.filter(t=>t.accountName===a).reduce((s,t)=>s+Number(t.pnl||0),0);bar(v,left+i*slot+(slot-bw)/2,bw,a,`${a}\nCumulative realized P/L: ${fmtPnl(v)}`,a.replace('Litmus','Litmus '));}); }
+  else {const gap=Math.max(2,Math.min(10,plotW/data.length*.2)),bw=Math.max(4,plotW/data.length-gap),step=plotW/data.length; data.forEach((t,i)=>{const stamp=new Date(t.timestamp||t.exitTime||t.entryTime),v=Number(t.pnl),x=left+i*step+gap/2,xt=stamp.toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});bar(v,x,bw,t.accountName,`${t.accountName||'Unknown account'} / ${t.agentName||'Unassigned'}\n${t.symbol}\n${fmtPnl(v)}\n${stamp.toLocaleString()}`,xt);});}
+}
+function showTradeTooltip(event,text){const tip=document.getElementById('trade-chart-tooltip');if(!tip)return;tip.hidden=false;tip.textContent=text;const r=document.querySelector('.trade-chart-wrap').getBoundingClientRect();tip.style.left=Math.max(4,event.clientX-r.left+8)+'px';tip.style.top=Math.max(4,event.clientY-r.top-70)+'px';}
+
+function hideTradeTooltip(){const tip=document.getElementById('trade-chart-tooltip');if(tip)tip.hidden=true;}
+
+async function loadVerifiedTrades() {
+  if (verifiedTradesLoading) return;
+  verifiedTradesLoading = true;
+  try {
+    const res = await fetch('/api/trades');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json(); verifiedTrades=data.trades||[]; verifiedOrders=data.orders||[];
+    const summary=document.getElementById('trade-chart-summary');
+    const pnl=verifiedTrades.reduce((sum,t)=>sum+Number(t.pnl||0),0);
+    if(summary) summary.textContent=`${verifiedTrades.length} realized trade${verifiedTrades.length===1?'':'s'} | Net P/L ${fmtPnl(pnl)} | Open/unmatched fills are shown as P/L pending.`;
+    const status=document.getElementById('trade-ledger-status'); if(status) status.textContent='Updated '+new Date(data.generatedAt||Date.now()).toLocaleTimeString();
+    renderTradeChart(); renderVerifiedTradeFeed();
+  } catch(err) {
+    const summary=document.getElementById('trade-chart-summary'); if(summary) summary.textContent='Unable to load the verified trade ledger: '+err.message;
+    const feed=clearTradeFeed(); if(feed) feed.innerHTML='<div class="no-data">Trade ledger unavailable.</div>';
+  } finally { verifiedTradesLoading=false; }
+}
+
+const TOOL_REFERENCE = {
+  Trading: {
+    get_account: 'Reads cash, buying power, portfolio value, and account status.',
+    get_positions: 'Lists current open stock and option positions.',
+    get_orders: 'Lists submitted orders and their current statuses.',
+    place_buy_order: 'Submits a stock or option buy order.',
+    place_sell_order: 'Submits a stock or option sell order.',
+    place_managed_position: 'Opens a position with automated stop-loss and take-profit management.',
+    get_managed_positions: 'Lists positions managed by the trading service.',
+    close_managed_position: 'Closes a managed position.',
+    cancel_order: 'Cancels an open order by broker order ID.',
+  },
+  Options: {
+    place_options_order: 'Submits an options order with contract, side, quantity, and pricing details.',
+    get_options_positions: 'Lists current options positions.',
+    get_options_position: 'Reads one options position by symbol or contract.',
+    get_options_chain: 'Retrieves available option contracts and quotes for an underlying symbol.',
+  },
+  'Market Data': {
+    get_quote: 'Gets the latest quote for a symbol.',
+    get_latest_bar: 'Gets the latest OHLCV price bar.',
+    get_historical_bars: 'Retrieves historical OHLCV bars for analysis.',
+    analyze_stocks: 'Calculates technical indicators, trend, support, and resistance.',
+  },
+  News: {
+    get_news: 'Retrieves recent market or symbol news.',
+    search_news: 'Searches news sources for a topic or symbol.',
+    get_market_news: 'Gets a current market-news digest.',
+    get_quick_market_intelligence: 'Builds a compact market intelligence snapshot.',
+    get_cleaned_news: 'Returns normalized and cleaned news articles.',
+    get_marketwatch_topstories: 'Retrieves MarketWatch top stories.',
+    get_marketwatch_realtime: 'Retrieves MarketWatch real-time market coverage.',
+  },
+  Intelligence: {
+    aggregate_and_summarize_news: 'Aggregates news and creates a summary.',
+    list_news_summaries: 'Lists saved news summaries.',
+    get_news_summary: 'Reads a saved news summary by identifier.',
+  },
+  'Agent Config': {
+    list_sandboxes: 'Lists accounts/sandboxes, assigned agents, models, and runtime status.',
+    update_agent_prompt: 'Updates an agent identity or custom system prompt.',
+    update_strategy_rules: 'Creates or updates strategy rules for the active sandbox.',
+    get_agent_config: 'Reads the current agent, strategy, heartbeat, and permissions.',
+    set_heartbeat: 'Requests a runtime heartbeat interval override when policy permits.',
+    update_permissions: 'Changes trading permissions and risk guardrails.',
+    set_session_mode: 'Sets continuous or fresh OpenCode session behavior.',
+    create_agent: 'Creates a new agent persona.',
+    create_strategy: 'Creates a new strategy with trading rules.',
+    assign_agent_to_sandbox: 'Assigns an agent to an account/sandbox.',
+  },
+  Heartbeat: {
+    get_heartbeat_profiles: 'Lists predefined heartbeat schedules.',
+    apply_heartbeat_profile: 'Applies a predefined heartbeat schedule.',
+    get_heartbeat_phases: 'Reads market-phase time ranges.',
+    update_heartbeat_phase: 'Changes the time range for a market phase.',
+  },
+  Logging: {
+    log_decision: 'Records a trading decision and its reasoning.',
+    log_activity: 'Records an activity note in the account log.',
+    get_activity_log: 'Reads the current account activity log.',
+    get_session_context: 'Retrieves compact prior sessions and decision/tool context.',
+  },
+  'Trade History': {
+    find_similar_setups: 'Finds historically similar trade setups for comparison.',
+    store_trade_setup: 'Stores a trade thesis and outcome for future learning.',
+    get_trade_stats: 'Returns resolved trade statistics and performance metrics.',
+  },
+  Utility: {
+    get_datetime: 'Returns current time and market phase information.',
+    wait: 'Pauses execution for a requested short duration.',
+  },
+};
+
+function renderToolReference() {
+  const el = document.getElementById('tool-descriptions');
+  if (!el) return;
+  el.innerHTML = '<div class="section-title" style="font-size:12px;margin-bottom:8px">Tool Reference</div>'
+    + '<div class="form-hint" style="margin-bottom:10px">Names below are the exact names used in the blocked-tools field. Blocking a tool prevents the agent from calling it.</div>'
+    + Object.entries(TOOL_REFERENCE).map(([category, tools]) => '<div style="margin-top:10px"><div style="font-size:11px;font-weight:600;color:var(--accent-light);margin-bottom:4px">' + esc(category) + '</div>'
+      + Object.entries(tools).map(([name, description]) => '<div style="display:grid;grid-template-columns:minmax(180px,260px) 1fr;gap:10px;padding:4px 0;border-bottom:1px solid var(--rule-light);font-size:11px;line-height:1.45"><code style="color:var(--accent);white-space:nowrap">' + esc(name) + '</code><span style="color:var(--ink-muted)">' + esc(description) + '</span></div>').join('') + '</div>').join('');
+}
+
+// ── Legacy live card compatibility ─────────
+function addTradeCard(trade) { loadVerifiedTrades(); }
 
 // ── Render config panels ───────────────────
 function renderAll() {
   renderSandboxSelector();
   renderSandboxTabs();
   renderAgents(); renderStrategies(); renderAccounts();
-  renderHeartbeat(); renderPermissions(); renderSlack(); renderPromptPreview();
+  renderHeartbeat(); renderPermissions(); renderSlack(); renderPromptPreview(); renderToolReference();
   document.getElementById('footer-model').textContent = ((sandboxScoped.agent?.model || config.activeModel || '--')).replace('claude-','').split('-202')[0];
 }
 
@@ -1894,7 +2223,7 @@ function ensureSandboxTerminal(sandboxId, label) {
             </select>
           </div>
           <div style="margin-top:4px;display:flex;gap:4px">
-            <input type="number" placeholder="sec" min="15" max="7200" style="flex:1;padding:4px;font-size:11px;background:var(--bg-dark);color:var(--text);border:1px solid var(--border);border-radius:3px;width:60px" data-stat="${sandboxId}-hb-override">
+            <input type="number" placeholder="sec" min="15" max="14400" style="flex:1;padding:4px;font-size:11px;background:var(--bg-dark);color:var(--text);border:1px solid var(--border);border-radius:3px;width:60px" data-stat="${sandboxId}-hb-override">
             <button class="btn sm" onclick="overrideHb('${sandboxId}')" style="font-size:10px;padding:3px 8px">Set</button>
           </div>
         </div>
@@ -1963,8 +2292,25 @@ function renderSandboxTabs() {
   }
 }
 
+function refreshManagerModelSelectors() {
+  const providerSel = document.getElementById('mgr-provider');
+  const modelSel = document.getElementById('mgr-model');
+  if (!providerSel || !modelSel) return;
+  const models = config.models || [];
+  const mgr = config.manager || {};
+  const currentModel = mgr.model || config.activeModel || 'anthropic/claude-sonnet-4-6';
+  const currentProvider = currentModel.split('/')[0];
+  const providers = [...new Set(models.map(m => m.id.split('/')[0]))].sort();
+  providerSel.innerHTML = providers.map(p => '<option value="' + esc(p) + '"' + (p === currentProvider ? ' selected' : '') + '>' + esc(p) + '</option>').join('');
+  const provider = providerSel.value || currentProvider;
+  modelSel.innerHTML = models.filter(m => m.id.startsWith(provider + '/')).map(m => '<option value="' + esc(m.id) + '"' + (m.id === currentModel ? ' selected' : '') + '>' + esc(m.name) + '</option>').join('');
+}
+
 function ensureManagerTerminal() {
-  if (sandboxTerminals['_manager']) return;
+  if (sandboxTerminals['_manager']) {
+    refreshManagerModelSelectors();
+    return;
+  }
   const container = document.getElementById('sandbox-terminals');
   const wrapper = document.createElement('div');
   wrapper.id = 'term-wrap-_manager';
@@ -2179,7 +2525,7 @@ async function overrideHb(sandboxId) {
   const input = document.querySelector(`[data-stat="${sandboxId}-hb-override"]`);
   if (!input) return;
   const v = parseInt(input.value);
-  if (!v || v < 15 || v > 7200) return;
+  if (!v || v < 15 || v > 14400) return;
   input.value = '';
   try {
     await fetch('/api/agent/heartbeat', {

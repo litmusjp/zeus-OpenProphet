@@ -5,18 +5,22 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { execSync } from 'child_process';
-import { DEFAULT_AGENT_MODEL, alpacaTradingUrl } from './defaults.js';
+import { DEFAULT_AGENT_MODEL, alpacaTradingUrl, resolveAgentModel } from './defaults.js';
+
+function configuredDefaultModel() {
+  return resolveAgentModel();
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = process.env.OPENPROPHET_CONFIG_PATH || path.join(__dirname, '..', 'data', 'agent-config.json');
 
 const DEFAULT_HEARTBEAT = {
-  pre_market: 900,
-  market_open: 120,
-  midday: 600,
-  market_close: 120,
-  after_hours: 1800,
-  closed: 3600,
+  pre_market: 3600,
+  market_open: 900,
+  midday: 1800,
+  market_close: 900,
+  after_hours: 7200,
+  closed: 14400,
 };
 
 export const HEARTBEAT_PROFILES = {
@@ -62,7 +66,7 @@ export const PHASE_TIME_RANGES = {
 };
 
 const DEFAULT_PERMISSIONS = {
-  allowLiveTrading: true,
+  allowLiveTrading: false,
   maxPositionPct: 15,
   maxDeployedPct: 80,
   maxDailyLoss: 5,
@@ -113,7 +117,7 @@ function defaultAgents() {
       description: 'Aggressive discretionary options trader with scalping overlay',
       systemPromptTemplate: 'default',
       strategyId: 'default',
-      model: DEFAULT_AGENT_MODEL,
+      model: configuredDefaultModel(),
       heartbeatOverrides: {},
       customSystemPrompt: '',
       createdAt: new Date().toISOString(),
@@ -125,7 +129,7 @@ function defaultAgents() {
       systemPromptTemplate: 'custom',
       customSystemPrompt: 'You are Guardian, a conservative AI trading agent. You prioritize capital preservation above all else, trading only when the setup is clear and the risk is well-defined. You would rather sit in cash than force a trade.',
       strategyId: 'capital-preservation',
-      model: DEFAULT_AGENT_MODEL,
+      model: configuredDefaultModel(),
       heartbeatOverrides: {
         pre_market: 1800,
         market_open: 300,
@@ -142,7 +146,7 @@ function defaultAgents() {
       systemPromptTemplate: 'custom',
       customSystemPrompt: 'You are Surge, a momentum trading agent. You hunt for liquid large-cap stocks and ETFs breaking out on strong volume and ride the trend while it is confirmed by price and volume, cutting away the moment momentum stalls. You chase strength, never a falling price.',
       strategyId: 'equity-momentum',
-      model: DEFAULT_AGENT_MODEL,
+      model: configuredDefaultModel(),
       heartbeatOverrides: {
         pre_market: 600,
         market_open: 60,
@@ -159,7 +163,7 @@ function defaultAgents() {
       systemPromptTemplate: 'custom',
       customSystemPrompt: 'You are Pendulum, a mean-reversion trading agent. You trade liquid, broad-based ETFs that have stretched too far too fast from their recent average and are showing early signs of snapping back, taking profit as price returns toward the mean rather than chasing a trend.',
       strategyId: 'etf-mean-reversion',
-      model: DEFAULT_AGENT_MODEL,
+      model: configuredDefaultModel(),
       heartbeatOverrides: {
         pre_market: 1200,
         market_open: 180,
@@ -176,7 +180,7 @@ function defaultAgents() {
       systemPromptTemplate: 'custom',
       customSystemPrompt: 'You are Compass, a macro rotation agent. You read the broad market regime — rates, breadth, relative sector strength — and rotate a small number of liquid index and sector ETF positions to align with the prevailing macro trend, rebalancing deliberately rather than reacting to daily noise.',
       strategyId: 'macro-rotation',
-      model: DEFAULT_AGENT_MODEL,
+      model: configuredDefaultModel(),
       heartbeatOverrides: {
         pre_market: 3600,
         market_open: 1800,
@@ -193,7 +197,7 @@ function defaultAgents() {
       systemPromptTemplate: 'custom',
       customSystemPrompt: 'You are Anchor, a long-horizon trend-following agent. You build and hold positions in liquid large-cap stocks and ETFs that are in a durable, established uptrend over many months, adding patience where others add activity, and only step aside when the underlying trend itself breaks.',
       strategyId: 'long-horizon-trend',
-      model: DEFAULT_AGENT_MODEL,
+      model: configuredDefaultModel(),
       heartbeatOverrides: {
         pre_market: 7200,
         market_open: 3600,
@@ -210,7 +214,7 @@ function defaultAgents() {
       systemPromptTemplate: 'custom',
       customSystemPrompt: 'You are Herald, a catalyst-driven trading agent. You trade the confirmed market reaction to specific, already-public news and events — earnings prints, guidance changes, major headlines — never the rumor or the guess beforehand, entering only after the market has shown its hand and exiting once the initial reaction has played out.',
       strategyId: 'catalyst-news',
-      model: DEFAULT_AGENT_MODEL,
+      model: configuredDefaultModel(),
       heartbeatOverrides: {
         pre_market: 300,
         market_open: 30,
@@ -227,7 +231,7 @@ function defaultAgents() {
       systemPromptTemplate: 'custom',
       customSystemPrompt: "You are Vega, a long-premium volatility agent. You buy options outright — calls or puts, never written or spread — to express a view on a stock's expected move around a specific volatility catalyst, treating the premium paid as your entire, pre-defined risk on every trade.",
       strategyId: 'long-premium-volatility',
-      model: DEFAULT_AGENT_MODEL,
+      model: configuredDefaultModel(),
       heartbeatOverrides: {
         pre_market: 900,
         market_open: 120,
@@ -623,7 +627,7 @@ function createSandbox(account, overrides = {}) {
     name: overrides.name || account.name || `Sandbox ${account.id}`,
     agent: {
       activeAgentId: overrides.agent?.activeAgentId || overrides.activeAgentId || 'default',
-      model: overrides.agent?.model || overrides.activeModel || DEFAULT_AGENT_MODEL,
+      model: overrides.agent?.model || overrides.activeModel || configuredDefaultModel(),
       overrides: {
         ...DEFAULT_AGENT_OVERRIDES,
         ...(overrides.agent?.overrides || {}),
@@ -645,7 +649,7 @@ function createDefaultConfig() {
 
     // Legacy compatibility aliases. Keep mirrored during migration.
     activeAgentId: 'default',
-    activeModel: DEFAULT_AGENT_MODEL,
+    activeModel: configuredDefaultModel(),
     heartbeat: { ...DEFAULT_HEARTBEAT },
     permissions: { ...DEFAULT_PERMISSIONS },
     plugins: mergePlugins(),
@@ -655,7 +659,7 @@ function createDefaultConfig() {
     agents: defaultAgents(),
     strategies: defaultStrategies(),
     manager: {
-      model: DEFAULT_AGENT_MODEL,
+      model: configuredDefaultModel(),
       customPrompt: '',
     },
     models: getAvailableModels(),
@@ -707,7 +711,7 @@ function mergeSandbox(sandbox, fallback = {}) {
     ...sandbox,
     agent: {
       activeAgentId: sandbox?.agent?.activeAgentId || fallback.activeAgentId || 'default',
-      model: sandbox?.agent?.model || fallback.activeModel || DEFAULT_AGENT_MODEL,
+      model: sandbox?.agent?.model || fallback.activeModel || configuredDefaultModel(),
       overrides: {
         ...DEFAULT_AGENT_OVERRIDES,
         ...(sandbox?.agent?.overrides || {}),
@@ -737,6 +741,16 @@ function normalizeConfig(raw = {}) {
     strategies: mergeBuiltinCatalog(raw.strategies, defaults.strategies),
     models: raw.models || defaults.models,
   };
+
+  // Never allow a paper account to route trading requests to a live/custom endpoint.
+  config.accounts = config.accounts.map((account) => {
+    const paper = account.paper !== false;
+    return {
+      ...account,
+      paper,
+      baseUrl: alpacaTradingUrl(paper, paper ? undefined : account.baseUrl),
+    };
+  });
 
   for (const [sandboxId, sandbox] of Object.entries(config.sandboxes)) {
     config.sandboxes[sandboxId] = mergeSandbox({ id: sandboxId, ...sandbox }, config);
@@ -769,6 +783,7 @@ function migrateLegacyConfig(config) {
         name: config.sandboxes[sandboxId].name || account.name,
       }, config);
     }
+    if (account.paper) config.sandboxes[sandboxId].permissions.allowLiveTrading = false;
   }
 
   if (!config.activeAccountId) {

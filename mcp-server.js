@@ -19,6 +19,8 @@ const TRADING_BOT_URL = process.env.TRADING_BOT_URL || 'http://127.0.0.1:4534';
 const TRADING_BOT_TOKEN = process.env.TRADING_BOT_TOKEN || '';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const OPENPROPHET_ACCOUNT_ID = process.env.OPENPROPHET_ACCOUNT_ID || 'default';
+const OPENPROPHET_ROLE = process.env.OPENPROPHET_ROLE || 'agent';
+const SESSION_CONTEXT_ACCOUNT_ID = OPENPROPHET_ROLE === 'manager' ? '__manager__' : OPENPROPHET_ACCOUNT_ID;
 const OPENPROPHET_SANDBOX_ID = process.env.OPENPROPHET_SANDBOX_ID || `sbx_${OPENPROPHET_ACCOUNT_ID}`;
 const SANDBOX_DATA_DIR = path.join(process.cwd(), 'data', 'sandboxes', OPENPROPHET_ACCOUNT_ID);
 const SUMMARIES_DIR = path.join(SANDBOX_DATA_DIR, 'news_summaries');
@@ -1010,11 +1012,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'set_heartbeat',
-        description: 'Override the agent heartbeat interval. Use this to speed up or slow down your own heartbeat cycle based on market conditions or workload. For example, set to 60s during volatile markets or 600s when nothing is happening.',
+        description: 'Override the agent heartbeat interval after the initial Settings-controlled warm-up. Settings remain priority for the first two completed market sessions. Use force=true only for an urgent, strongly justified market condition.',
         inputSchema: {
           type: 'object',
           properties: {
-            seconds: { type: 'number', description: 'New heartbeat interval in seconds (30-3600)' },
+            seconds: { type: 'number', description: 'New heartbeat interval in seconds (30-14400; maximum 4 hours)' },
+            force: { type: 'boolean', description: 'Allow an early override before two completed market sessions; requires a meaningful urgent reason' },
             reason: { type: 'string', description: 'Reason for the override (logged to terminal)' },
           },
           required: ['seconds'],
@@ -1098,6 +1101,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
           },
           required: ['phase'],
+        },
+      },
+      {
+        name: 'list_sandboxes',
+        description: 'List all OpenProphet sandboxes/accounts with their IDs, names, assigned agents, models, and runtime status. Use this before assigning or inspecting a sandbox.',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+      {
+        name: 'get_session_context',
+        description: 'Retrieve compact prior chat, strategy, decision, and tool-event context for the current account. Use for continuity and learning; verify live state before trading.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sessions: { type: 'number', description: 'Number of recent sessions (default 5, max 20)' },
+            messages: { type: 'number', description: 'Messages per session (default 8, max 20)' },
+          },
         },
       },
       {
@@ -1216,7 +1238,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const requestData = {
           symbol: args.symbol,
           qty: args.quantity,
-          order_type: args.order_type,
+          type: args.order_type,
           ...(args.limit_price && { limit_price: args.limit_price })
         };
         const data = await callTradingBot('/orders/buy', 'POST', requestData);
@@ -1229,7 +1251,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const requestData = {
           symbol: args.symbol,
           qty: args.quantity,
-          order_type: args.order_type,
+          type: args.order_type,
           ...(args.limit_price && { limit_price: args.limit_price })
         };
         const data = await callTradingBot('/orders/sell', 'POST', requestData);
@@ -2071,6 +2093,33 @@ Worst Trade: ${stats.worst_result_pct.toFixed(1)}% ($${stats.worst_result_dollar
         };
       }
 
+      case 'get_session_context': {
+        const params = new URLSearchParams({
+          accountId: SESSION_CONTEXT_ACCOUNT_ID,
+          sessions: String(args?.sessions || 5),
+          messages: String(args?.messages || 8),
+        });
+        const resp = await agentAxios.get(`${AGENT_URL}/api/chats/context?${params.toString()}`, { timeout: 5000 });
+        return { content: [{ type: 'text', text: JSON.stringify(resp.data?.context || [], null, 2) }] };
+      }
+
+      case 'list_sandboxes': {
+        const resp = await agentAxios.get(`${AGENT_URL}/api/sandboxes`);
+        const sandboxes = Array.isArray(resp.data?.sandboxes) ? resp.data.sandboxes : [];
+        const result = sandboxes.map(sandbox => ({
+          sandboxId: sandbox.id,
+          name: sandbox.name,
+          accountId: sandbox.accountId,
+          accountName: sandbox.accountName || sandbox.account?.name || sandbox.name || null,
+          activeAgentId: sandbox.agent?.activeAgentId || sandbox.activeAgentId || null,
+          agentName: sandbox.agent?.name || null,
+          model: sandbox.agent?.model || null,
+          running: Boolean(sandbox.runtime?.running),
+          paused: Boolean(sandbox.runtime?.paused),
+        }));
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      }
+
       case 'get_agent_config': {
         const [configResp, permResp, hbResp, sandboxResp] = await Promise.all([
           agentAxios.get(`${AGENT_URL}/api/config`),
@@ -2105,11 +2154,13 @@ Worst Trade: ${stats.worst_result_pct.toFixed(1)}% ($${stats.worst_result_dollar
       }
 
       case 'set_heartbeat': {
-        const seconds = Math.min(Math.max(args.seconds, 30), 3600);
+        const seconds = Math.min(Math.max(Number(args.seconds), 30), 14400);
         await agentAxios.post(`${AGENT_URL}/api/agent/heartbeat`, {
           seconds,
+          force: Boolean(args.force),
+          agentRequest: true,
           sandboxId: OPENPROPHET_SANDBOX_ID,
-          reason: args.reason || `Agent override to ${seconds}s`,
+          reason: args.reason,
         });
         return {
           content: [{ type: 'text', text: `Heartbeat interval set to ${seconds}s. ${args.reason || ''}` }],
