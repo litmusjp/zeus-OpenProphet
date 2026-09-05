@@ -66,7 +66,7 @@ export const PHASE_TIME_RANGES = {
 };
 
 const DEFAULT_PERMISSIONS = {
-  allowLiveTrading: true,
+  allowLiveTrading: false,
   maxPositionPct: 15,
   maxDeployedPct: 80,
   maxDailyLoss: 5,
@@ -773,6 +773,7 @@ function migrateLegacyConfig(config) {
         name: config.sandboxes[sandboxId].name || account.name,
       }, config);
     }
+    if (account.paper) config.sandboxes[sandboxId].permissions.allowLiveTrading = false;
   }
 
   if (!config.activeAccountId) {
