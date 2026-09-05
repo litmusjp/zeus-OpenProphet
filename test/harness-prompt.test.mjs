@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AgentHarness, buildSystemPrompt, getOpenCodeEnvCredential, hasOpenCodeCredential, tradeEventFromToolUse } from '../agent/harness.js';
+import { AgentHarness, buildSystemPrompt, getOpenCodeEnvCredential, hasOpenCodeCredential, tradeEventFromToolUse, getHeartbeatScheduleSeconds } from '../agent/harness.js';
 import { createGoLogLineBuffer, shouldShowGoLogLine } from '../agent/orchestrator.js';
 import { buildTradeLedger } from '../agent/trade-ledger.js';
 
@@ -126,4 +126,18 @@ test('custom template overrides the identity but keeps the operating instruction
   const p = await buildSystemPrompt({ systemPromptTemplate: 'custom', customSystemPrompt: 'I am a custom bot.' }, {});
   assert.ok(p.startsWith('I am a custom bot.'), 'uses the custom identity verbatim');
   assert.ok(p.includes('## Your Heartbeat Loop'), 'still appends the system instructions');
+});
+
+test('heartbeat scheduling wakes at the next market phase boundary', () => {
+  assert.equal(getHeartbeatScheduleSeconds(3600, 'pre_market', 9 * 60 + 27, 0), 180);
+  assert.equal(getHeartbeatScheduleSeconds(3600, 'pre_market', 9 * 60 + 30, 0), 3600);
+  assert.equal(getHeartbeatScheduleSeconds(900, 'market_open', 10 * 60 + 20, 0), 600);
+  assert.equal(getHeartbeatScheduleSeconds(900, 'midday', 12 * 60, 0), 900);
+});
+
+test('system prompt distinguishes an immediate broker submission from a future plan', async () => {
+  const p = await buildSystemPrompt({ name: 'Prophet' }, {});
+  assert.match(p, /no queue|no scheduled|immediately to the broker/i);
+  assert.match(p, /market open.*place|place.*market open/i);
+  assert.match(p, /never claim.*placed|only claim.*placed|broker-confirmed/i);
 });

@@ -32,6 +32,21 @@ export function getCurrentPhase() {
   return 'closed';
 }
 
+// Keep a long phase interval from skipping the next market-phase boundary.
+// currentMinutes/currentSeconds are injectable for deterministic tests.
+export function getHeartbeatScheduleSeconds(baseSeconds, phase, currentMinutes = null, currentSeconds = 0) {
+  const range = PHASE_DEFAULTS[phase]?.range;
+  if (!range) return baseSeconds;
+  const minutes = currentMinutes ?? (() => {
+    const now = new Date();
+    const et = now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false });
+    const [h, m] = et.split(':').map(Number);
+    return h * 60 + m;
+  })();
+  const secondsUntilBoundary = (range[1] - minutes) * 60 - currentSeconds;
+  return secondsUntilBoundary > 0 ? Math.min(baseSeconds, secondsUntilBoundary) : baseSeconds;
+}
+
 export function tradeEventFromToolUse(fullToolName, toolInput = {}) {
   const tool = String(fullToolName || '').replace('prophet_', '');
   const defaultSides = {
@@ -112,6 +127,13 @@ Each time you wake, work this loop in order and stop once you've acted or confir
 5. RECALL — before opening any NEW position, call \`prophet_find_similar_setups\` with your thesis and weigh how similar past setups actually resolved.
 6. DECIDE & ACT — place an order only if you have a stated edge AND the guardrails allow it. Use a limit price and always pass a \`thesis\` argument. Otherwise do nothing and say so.
 7. RECORD — call \`prophet_log_decision\` with the reasoning behind every trade; when a position closes, call \`prophet_store_trade_setup\` with the realized result so your memory compounds.
+
+## Execution Contract (strict)
+- There is no queue, schedule, delayed-entry, or "place at market open" tool. Every order tool submits immediately to the broker.
+- A written plan, intention, watchlist item, or statement that you "will place" a trade is NOT an order and must never be reported as queued, submitted, or placed.
+- During pre-market, record and review a candidate plan only; do not submit a future entry to stage market-open execution.
+- At the first market-open heartbeat, re-check price, liquidity, account, positions, risk, and thesis, then call the exact registered order tool immediately if the setup remains valid. If you do not call the tool, report "not submitted".
+- Only report an order as placed/submitted after the order tool returns a broker response containing its order identity/status. Never claim an order was placed without that broker-confirmed response; never claim execution from your own narrative.
 
 ## Phase Playbook (ET)
 - Pre-market (4–9:30): gather intelligence, build a watchlist and theses. Don't chase thin pre-market prints.
@@ -627,7 +649,7 @@ ${userBlock}`;
     if (!this.state.running) return;
     // Always clear any existing timer first to prevent dual timers
     if (this._timer) { clearTimeout(this._timer); this._timer = null; }
-    const seconds = this._getHeartbeatSeconds();
+    const seconds = getHeartbeatScheduleSeconds(this._getHeartbeatSeconds(), this.state.phase);
     this.state.heartbeatSeconds = seconds;
     this.state.nextBeatTime = new Date(Date.now() + seconds * 1000).toISOString();
     this.state.emit('schedule', { seconds, nextBeat: this.state.nextBeatTime, phase: this.state.phase });
@@ -788,6 +810,8 @@ ${userBlock}`;
       let buffer = '';
       let totalCost = 0;
       let totalTokens = 0;
+      let stderrText = '';
+      let timedOut = false;
 
       proc.stdout.on('data', (chunk) => {
         buffer += chunk.toString();
@@ -813,6 +837,7 @@ ${userBlock}`;
       proc.stderr.on('data', (chunk) => {
         const msg = chunk.toString().trim();
         if (msg) {
+          stderrText = `${stderrText}${msg}\n`.slice(-2000);
           this.state.emit('agent_log', { message: `[opencode] ${msg}`, level: 'info' });
         }
       });
@@ -863,8 +888,10 @@ ${userBlock}`;
           level: code === 0 ? 'info' : 'warning',
         });
 
-        if (code !== 0 && code !== null && !fullText) {
-          resolve({ error: `opencode exited with code ${code} signal ${signal}`, text: fullText, toolCalls, toolEvents, sessionId, sessionEpoch });
+        if (timedOut && !fullText) {
+          resolve({ error: `opencode timed out after ${BEAT_TIMEOUT_MS / 1000}s; harness sent SIGTERM${stderrText ? `: ${stderrText.trim()}` : ''}`, text: fullText, toolCalls, toolEvents, sessionId, sessionEpoch });
+        } else if (code !== 0 && code !== null && !fullText) {
+          resolve({ error: `opencode exited with code ${code} signal ${signal}${stderrText ? `: ${stderrText.trim()}` : ''}`, text: fullText, toolCalls, toolEvents, sessionId, sessionEpoch });
         } else if (signal && !fullText) {
           resolve({ error: `opencode killed by ${signal}`, text: fullText, toolCalls, toolEvents, sessionId, sessionEpoch });
         } else {
@@ -875,7 +902,8 @@ ${userBlock}`;
       // Safety timeout - 5 minutes max per beat
       this._beatTimeout = setTimeout(() => {
         if (proc && !proc.killed) {
-          this.state.emit('agent_log', { message: 'Beat timed out (5 min max), killing process.', level: 'warning' });
+          timedOut = true;
+          this.state.emit('agent_log', { message: `Beat timed out (${BEAT_TIMEOUT_MS / 1000}s max), killing process with SIGTERM.`, level: 'warning' });
           proc.kill('SIGTERM');
           // Escalate to SIGKILL if the process ignores SIGTERM (otherwise the beat hangs forever).
           setTimeout(() => {
