@@ -597,7 +597,20 @@
       background: var(--success-bg); border: 1px solid var(--success); border-radius: 4px; font-size: 13px;
     }
     .review-activate input { width: auto; margin-top: 2px; }
-    .review-note { margin-top: 16px; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 4px; font-size: 12px; color: var(--ink-muted); background: var(--paper); }
+    .operator-status-card {
+      display:flex; flex-direction:column; gap:5px; min-width:300px; max-width:560px;
+      padding:7px 10px; border:1px solid var(--rule); border-radius:7px; background:var(--paper-dark);
+      font-size:11px; line-height:1.35;
+    }
+    .operator-status-main, .operator-status-details { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .operator-mode-badge { color:var(--warning); border:1px solid var(--warning); border-radius:3px; padding:1px 4px; font-size:9px; letter-spacing:.06em; }
+    .operator-mode-badge.live { color:var(--danger); border-color:var(--danger); }
+    .operator-mode-badge.unknown { color:var(--warning); border-color:var(--warning); }
+    .operator-attention { color:var(--success); margin-left:auto; }
+    .operator-attention.has-attention { color:var(--warning); }
+    .operator-status-details { color:var(--ink-muted); }
+    .operator-status-details b { color:var(--ink); font-weight:500; }
+    .operator-last-action { color:var(--ink-faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
     /* ── Footer Bar ─────────────────────── */
     .footer {
@@ -622,8 +635,9 @@
       .clock { display: none; }
       .phase-badge { font-size: 9px; padding: 2px 6px; }
       
-      /* Hide sandbox selector on mobile - use tabs instead */
-      .topbar-right > div:first-child { display: none; }
+      /* The status card and controls remain visible on mobile. */
+      .operator-status-card { min-width: 0; width: 100%; order: 3; }
+      .control-console { width: 100%; order: 4; }
       
       .sidebar { display: none; }
       .terminal-split { flex-direction: column; }
@@ -703,6 +717,21 @@
       <select id="sandbox-selector" style="display:none"></select>
       <span id="sandbox-status-badge" style="display:none"></span>
       <span class="clock" id="clock"></span>
+      <div class="operator-status-card" id="operator-status-card" aria-live="polite">
+        <div class="operator-status-main">
+          <span class="operator-mode-badge" id="operator-mode-badge">PAPER</span>
+          <strong id="operator-account-name">--</strong>
+          <span class="operator-attention" id="operator-attention">No attention items</span>
+        </div>
+        <div class="operator-status-details">
+          <span>Agent <b id="operator-agent-name">--</b></span>
+          <span>Model <b id="operator-model-name">--</b></span>
+          <span>Phase <b id="operator-phase">--</b></span>
+          <span>Heartbeat <b id="operator-heartbeat">--</b></span>
+          <span>Next <b id="operator-next-heartbeat">--</b></span>
+        </div>
+        <div class="operator-last-action" id="operator-last-action">Last broker-confirmed action: none recorded</div>
+      </div>
       <div class="control-console" title="Start/Pause/Stop act on this account's sandbox">
         <div class="cc-account">
           <span class="cc-account-label">Controlling</span>
@@ -1417,6 +1446,7 @@ function connectSSE() {
     const sid = d.sandboxId || getEffectiveSandboxId();
     logToSandbox(sid, `<div class="log-entry info"><span class="time">${fmtTime()}</span><span style="color:var(--ink-faint)"> -> ${esc(d.name)}: ${esc(d.result.substring(0,200))}</span></div>`);
     logHtml('<span style="color:var(--ink-faint)">  -> ' + esc(formatSandboxPrefix(d) + d.name) + ': ' + esc(d.result.substring(0,200)) + '</span>', 'info');
+    noteBrokerAction(d);
   });
   es.addEventListener('heartbeat_change', e => {
     const d = JSON.parse(e.data);
@@ -1482,6 +1512,36 @@ function connectSSE() {
 function _set(id, val) { const e = document.getElementById(id); if(e) e.textContent = val; }
 function _setData(key, val) { const e = document.querySelector(`[data-stat="${key}"]`); if(e) e.textContent = val; }
 
+function updateOperatorCard(s) {
+  const sid = s?.sandboxId || getEffectiveSandboxId();
+  if (!sid) return;
+  const sandbox = config?.sandboxes?.[sid] || {};
+  const account = (config?.accounts || []).find(a => a.id === sandbox.accountId);
+  const agent = (config?.agents || []).find(a => a.id === (s.activeAgentId || sandbox.agent?.activeAgentId));
+  const labels = { pre_market:'Pre-Market', market_open:'Market Open', midday:'Midday', market_close:'Market Close', after_hours:'After Hours', closed:'Closed' };
+  const isPaper = account ? account.paper !== false : null;
+  const modeBadge = document.getElementById('operator-mode-badge');
+  if (modeBadge) { modeBadge.textContent = isPaper === null ? 'UNKNOWN' : (isPaper ? 'PAPER' : 'LIVE'); modeBadge.classList.toggle('live', isPaper === false); modeBadge.classList.toggle('unknown', isPaper === null); }
+  _set('operator-account-name', account?.name || sandbox.name || '--');
+  _set('operator-agent-name', agent?.name || sandbox.agent?.activeAgentId || '--');
+  _set('operator-model-name', (s.activeModel || sandbox.agent?.model || '--').replace('opencode/', ''));
+  _set('operator-phase', labels[s.phase] || s.phase || '--');
+  _set('operator-heartbeat', s.heartbeatSeconds ? fmtInt(s.heartbeatSeconds) : '--');
+  const next = s.nextBeat ? new Date(s.nextBeat) : nextBeatTime;
+  _set('operator-next-heartbeat', next instanceof Date && !Number.isNaN(next.getTime()) ? Math.max(0, Math.ceil((next - Date.now()) / 1000)) + 's' : '--');
+  const attention = document.getElementById('operator-attention');
+  const count = Number(s.stats?.errors || 0);
+  if (attention) { attention.textContent = count ? `${count} attention item${count === 1 ? '' : 's'}` : 'No attention items'; attention.classList.toggle('has-attention', count > 0); }
+}
+
+function noteBrokerAction(d) {
+  if (!d?.name || (d.sandboxId && d.sandboxId !== getEffectiveSandboxId()) || !/^(place_|submit_)/.test(d.name)) return;
+  const result = String(d.result || '');
+  if (!/(?:accepted|submitted|pending|filled|partially[_ ]filled)/i.test(result)) return;
+  const el = document.getElementById('operator-last-action');
+  if (el) el.textContent = 'Last broker-confirmed action: ' + d.name.replace(/^place_/, '').replaceAll('_', ' ') + ' (' + new Date().toLocaleTimeString() + ')';
+}
+
 function updateState(s) {
   const sid = s?.sandboxId || getEffectiveSandboxId();
   
@@ -1503,6 +1563,7 @@ function updateState(s) {
   _set('stat-trades', s.stats?.trades || 0);
   _set('stat-errors', s.stats?.errors || 0);
   _set('hb-interval', fmtInt(s.heartbeatSeconds));
+  updateOperatorCard(s);
   _set('footer-model', (s.activeModel || '--').replace('claude-', '').split('-202')[0]);
   updatePhase(s.phase);
   updateButtons(s.running ? (s.paused ? 'paused' : 'started') : 'stopped');
@@ -1550,6 +1611,7 @@ function startProgress() {
     const pct = Math.max(0, Math.min(100, ((heartbeatSeconds*1000 - rem)/(heartbeatSeconds*1000))*100));
     const fillEl = document.getElementById('hb-fill'); if(fillEl) fillEl.style.width = pct + '%';
     _set('hb-next', Math.max(0, Math.ceil(rem/1000)) + 's');
+    _set('operator-next-heartbeat', Math.max(0, Math.ceil(rem/1000)) + 's');
   }, 1000);
 }
 
@@ -1559,7 +1621,21 @@ async function startAgent() {
   btn.textContent = 'Starting...'; btn.disabled = true;
   try {
     const sid = getEffectiveSandboxId();
-    if (!sid) { log('No sandbox selected', 'error'); return; }
+    if (!sid) { log('No sandbox selected', 'error'); btn.textContent = 'Start'; btn.disabled = false; return; }
+  const account = (config?.accounts || []).find(a => a.id === (config?.sandboxes?.[sid]?.accountId));
+    const sandbox = config?.sandboxes?.[sid] || {};
+    const agent = (config?.agents || []).find(a => a.id === sandbox.agent?.activeAgentId);
+    const mode = account ? (account.paper !== false ? 'PAPER' : 'LIVE') : 'UNKNOWN';
+    const model = sandbox.agent?.model || '--';
+    if (!account) {
+      btn.textContent = 'Start'; btn.disabled = false;
+      showToast('Start blocked: account identity could not be verified.', 'error');
+      return;
+    }
+    if (!confirm(`Start ${account?.name || sandbox.name || 'this account'}?\n\nMode: ${mode}\nAgent: ${agent?.name || sandbox.agent?.activeAgentId || '--'}\nModel: ${model}\n\nStart begins autonomous heartbeats. Existing broker orders are not changed.`)) {
+      btn.textContent = 'Start'; btn.disabled = false;
+      return;
+    }
     const r = await fetch('/api/sandboxes/' + encodeURIComponent(sid) + '/start', {method:'POST'});
     const d = await r.json();
     if (!d.ok && d.error) {
