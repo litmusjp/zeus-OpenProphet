@@ -86,8 +86,9 @@ const goAxios = axios.create({
 
 const app = express();
 // --- BASIC AUTH SETUP ---
-const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER || 'admin';
-const BASIC_AUTH_PASS = process.env.BASIC_AUTH_PASS || 'secret';
+const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER || (process.env.NODE_ENV === 'production' ? '' : 'admin');
+const BASIC_AUTH_PASS = process.env.BASIC_AUTH_PASS || (process.env.NODE_ENV === 'production' ? '' : 'secret');
+const BASIC_AUTH_CONFIGURED = Boolean(BASIC_AUTH_USER && BASIC_AUTH_PASS);
 
 app.use((req, res, next) => {
   // Allow internal requests from localhost/container services without auth
@@ -102,16 +103,27 @@ app.use((req, res, next) => {
     return next();
   }
 
+  if (!BASIC_AUTH_CONFIGURED) {
+    return res.status(503).send('Basic authentication is not configured.');
+  }
+
   // Enforce Basic Auth for external web visitors
   const authHeader = req.headers.authorization;
-  if (!authHeader) {
+  if (!authHeader || !authHeader.startsWith('Basic ')) {
     res.setHeader('WWW-Authenticate', 'Basic realm="OpenProphet Dashboard"');
     return res.status(401).send('Authentication required.');
   }
 
-  const auth = Buffer.from(authHeader.split(' ')[1], 'base64').toString().split(':');
-  const user = auth[0];
-  const pass = auth[1];
+  let credentials;
+  try {
+    credentials = Buffer.from(authHeader.slice(6), 'base64').toString();
+  } catch {
+    res.setHeader('WWW-Authenticate', 'Basic realm="OpenProphet Dashboard"');
+    return res.status(401).send('Authentication required.');
+  }
+  const separator = credentials.indexOf(':');
+  const user = separator >= 0 ? credentials.slice(0, separator) : '';
+  const pass = separator >= 0 ? credentials.slice(separator + 1) : '';
 
   if (user === BASIC_AUTH_USER && pass === BASIC_AUTH_PASS) {
     return next();
