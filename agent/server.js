@@ -144,9 +144,9 @@ function authMiddleware(req, res, next) {
   if (!AUTH_TOKEN) return next(); // no token configured = open access
   // Allow health check unauthenticated
   if (req.path === '/api/health') return next();
-  // Check Authorization header or query param
+  // Authorization headers avoid leaking bearer tokens through URLs and access logs.
   const header = req.headers.authorization;
-  const token = header?.startsWith('Bearer ') ? header.slice(7) : req.query.token;
+  const token = header?.startsWith('Bearer ') ? header.slice(7) : "";
   if (token === AUTH_TOKEN) return next();
   res.status(401).json({ error: 'Unauthorized. Set Authorization: Bearer <token> header.' });
 }

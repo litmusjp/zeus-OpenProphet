@@ -1238,7 +1238,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const requestData = {
           symbol: args.symbol,
           qty: args.quantity,
-          order_type: args.order_type,
+          type: args.order_type,
           ...(args.limit_price && { limit_price: args.limit_price })
         };
         const data = await callTradingBot('/orders/buy', 'POST', requestData);
@@ -1251,7 +1251,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const requestData = {
           symbol: args.symbol,
           qty: args.quantity,
-          order_type: args.order_type,
+          type: args.order_type,
           ...(args.limit_price && { limit_price: args.limit_price })
         };
         const data = await callTradingBot('/orders/sell', 'POST', requestData);

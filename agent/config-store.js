@@ -742,6 +742,16 @@ function normalizeConfig(raw = {}) {
     models: raw.models || defaults.models,
   };
 
+  // Never allow a paper account to route trading requests to a live/custom endpoint.
+  config.accounts = config.accounts.map((account) => {
+    const paper = account.paper !== false;
+    return {
+      ...account,
+      paper,
+      baseUrl: alpacaTradingUrl(paper, paper ? undefined : account.baseUrl),
+    };
+  });
+
   for (const [sandboxId, sandbox] of Object.entries(config.sandboxes)) {
     config.sandboxes[sandboxId] = mergeSandbox({ id: sandboxId, ...sandbox }, config);
   }
