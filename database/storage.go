@@ -50,6 +50,11 @@ func NewLocalStorage(dbPath string) (*LocalStorage, error) {
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
+	if db.Migrator().HasIndex(&models.DBPosition{}, "idx_positions_symbol") {
+		if err := db.Migrator().DropIndex(&models.DBPosition{}, "idx_positions_symbol"); err != nil {
+			return nil, fmt.Errorf("failed to migrate position symbol index: %w", err)
+		}
+	}
 	if db.Migrator().HasIndex(&models.DBOrder{}, "idx_orders_order_id") {
 		if err := db.Migrator().DropIndex(&models.DBOrder{}, "idx_orders_order_id"); err != nil {
 			return nil, fmt.Errorf("failed to migrate order ID index: %w", err)

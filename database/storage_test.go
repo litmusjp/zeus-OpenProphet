@@ -16,35 +16,23 @@ func TestSaveOrderUpsertsByClientOrderID(t *testing.T) {
 	defer storage.Close()
 
 	order := &interfaces.Order{
-		ClientOrderID: "op-test-order",
-		Symbol:        "AAPL",
-		Qty:           1,
-		Side:          "buy",
-		Type:          "market",
-		TimeInForce:   "day",
-		Status:        "pending",
-		SubmittedAt:   time.Now(),
+		ClientOrderID: "op-test-order", Symbol: "AAPL", Qty: 1, Side: "buy", Type: "market", TimeInForce: "day", Status: "pending", SubmittedAt: time.Now(),
 	}
 	if err := storage.SaveOrder(order); err != nil {
 		t.Fatalf("SaveOrder(intent) error = %v", err)
 	}
-
 	order.ID = "broker-order-id"
 	order.Status = "accepted"
 	if err := storage.SaveOrder(order); err != nil {
 		t.Fatalf("SaveOrder(result) error = %v", err)
 	}
-
 	var count int64
-	if err := storage.db.Model(&models.DBOrder{}).
-		Where("client_order_id = ?", order.ClientOrderID).
-		Count(&count).Error; err != nil {
+	if err := storage.db.Model(&models.DBOrder{}).Where("client_order_id = ?", order.ClientOrderID).Count(&count).Error; err != nil {
 		t.Fatalf("count saved orders: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("saved orders = %d, want 1", count)
 	}
-
 	saved, err := storage.GetOrder(order.ID)
 	if err != nil {
 		t.Fatalf("GetOrder() error = %v", err)
@@ -60,7 +48,6 @@ func TestSaveOrderUpdatesLegacyBrokerOrder(t *testing.T) {
 		t.Fatalf("NewLocalStorage() error = %v", err)
 	}
 	defer storage.Close()
-
 	order := &interfaces.Order{ID: "legacy-broker-order", Symbol: "AAPL", Status: "pending"}
 	if err := storage.SaveOrder(order); err != nil {
 		t.Fatalf("SaveOrder(initial) error = %v", err)
@@ -69,7 +56,6 @@ func TestSaveOrderUpdatesLegacyBrokerOrder(t *testing.T) {
 	if err := storage.SaveOrder(order); err != nil {
 		t.Fatalf("SaveOrder(update) error = %v", err)
 	}
-
 	var count int64
 	if err := storage.db.Model(&models.DBOrder{}).Where("order_id = ?", order.ID).Count(&count).Error; err != nil {
 		t.Fatalf("count saved orders: %v", err)
@@ -85,7 +71,6 @@ func TestGetOrdersNeedingReconciliation(t *testing.T) {
 		t.Fatalf("NewLocalStorage() error = %v", err)
 	}
 	defer storage.Close()
-
 	orders := []*interfaces.Order{
 		{ClientOrderID: "op-pending", Symbol: "AAPL", Status: "pending"},
 		{ClientOrderID: "op-submit-failed", Symbol: "MSFT", Status: "submit_failed"},
@@ -97,7 +82,6 @@ func TestGetOrdersNeedingReconciliation(t *testing.T) {
 			t.Fatalf("SaveOrder(%q) error = %v", order.Symbol, err)
 		}
 	}
-
 	got, err := storage.GetOrdersNeedingReconciliation()
 	if err != nil {
 		t.Fatalf("GetOrdersNeedingReconciliation() error = %v", err)
@@ -105,12 +89,34 @@ func TestGetOrdersNeedingReconciliation(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("GetOrdersNeedingReconciliation() returned %d orders, want 2", len(got))
 	}
-
 	clientOrderIDs := map[string]bool{}
 	for _, order := range got {
 		clientOrderIDs[order.ClientOrderID] = true
 	}
 	if !clientOrderIDs["op-pending"] || !clientOrderIDs["op-submit-failed"] {
 		t.Fatalf("GetOrdersNeedingReconciliation() client order IDs = %v, want pending and submit_failed orders", clientOrderIDs)
+	}
+}
+
+func TestSavePositionAllowsMultipleSnapshotsForSameSymbol(t *testing.T) {
+	storage, err := NewLocalStorage(filepath.Join(t.TempDir(), "positions.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer storage.Close()
+	position := &interfaces.Position{Symbol: "SPY", Qty: 1, CurrentPrice: 500}
+	if err := storage.SavePosition(position); err != nil {
+		t.Fatal(err)
+	}
+	position.CurrentPrice = 501
+	if err := storage.SavePosition(position); err != nil {
+		t.Fatalf("second snapshot should be accepted: %v", err)
+	}
+	var count int64
+	if err := storage.db.Table("positions").Where("symbol = ?", "SPY").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("expected two snapshots, got %d", count)
 	}
 }
