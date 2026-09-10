@@ -15,6 +15,7 @@ import { AgentHarness, buildSystemPrompt } from './harness.js';
 import ChatStore from './chat-store.js';
 import AgentOrchestrator from './orchestrator.js';
 import { alpacaTradingUrl, DEFAULT_AGENT_MODEL } from './defaults.js';
+import { assertProductionAuthConfigured, createAuthMiddleware } from './auth.js';
 import { migrateLegacyDataForAccount } from './data-migration.js';
 import {
   loadConfig, getConfig, saveConfig,
@@ -63,60 +64,11 @@ const goAxios = axios.create({
 });
 
 const app = express();
-// --- BASIC AUTH SETUP ---
-const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER || 'admin';
-const BASIC_AUTH_PASS = process.env.BASIC_AUTH_PASS || 'secret';
-
-app.use((req, res, next) => {
-  // Allow internal requests from localhost/container services without auth
-  const remoteIp = req.ip || req.connection.remoteAddress || '';
-  if (
-    remoteIp === '127.0.0.1' ||
-    remoteIp === '::1' ||
-    remoteIp === '::ffff:127.0.0.1' ||
-    req.hostname === 'localhost' ||
-    req.hostname === '127.0.0.1'
-  ) {
-    return next();
-  }
-
-  // Enforce Basic Auth for external web visitors
-  const authHeader = req.headers.authorization;
-  if (!authHeader) {
-    res.setHeader('WWW-Authenticate', 'Basic realm="OpenProphet Dashboard"');
-    return res.status(401).send('Authentication required.');
-  }
-
-  const auth = Buffer.from(authHeader.split(' ')[1], 'base64').toString().split(':');
-  const user = auth[0];
-  const pass = auth[1];
-
-  if (user === BASIC_AUTH_USER && pass === BASIC_AUTH_PASS) {
-    return next();
-  }
-
-  res.setHeader('WWW-Authenticate', 'Basic realm="OpenProphet Dashboard"');
-  return res.status(401).send('Access denied.');
-});
-// ------------------------
+assertProductionAuthConfigured();
+app.use(createAuthMiddleware());
 
 app.use(express.json({ limit: '1mb' }));
 
-// ── Auth Middleware ────────────────────────────────────────────────
-// Token-based auth. Set AGENT_AUTH_TOKEN env var to enable.
-// Without it, server is open (for local dev). With it, all API routes require the token.
-const AUTH_TOKEN = process.env.AGENT_AUTH_TOKEN || '';
-function authMiddleware(req, res, next) {
-  if (!AUTH_TOKEN) return next(); // no token configured = open access
-  // Allow health check unauthenticated
-  if (req.path === '/api/health') return next();
-  // Check Authorization header or query param
-  const header = req.headers.authorization;
-  const token = header?.startsWith('Bearer ') ? header.slice(7) : req.query.token;
-  if (token === AUTH_TOKEN) return next();
-  res.status(401).json({ error: 'Unauthorized. Set Authorization: Bearer <token> header.' });
-}
-app.use('/api', authMiddleware);
 
 // ── Go Backend Manager ─────────────────────────────────────────────
 // Manages the Go trading bot lifecycle, supports restarting with different Alpaca keys

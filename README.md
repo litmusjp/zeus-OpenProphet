@@ -147,7 +147,9 @@ OpenProphet
 - **Authenticated trading backend** — the Go API binds `127.0.0.1` by default and requires a
   bearer token on `/api/v1` (`/health` stays open). If `TRADING_BOT_TOKEN` is unset the
   dashboard mints an ephemeral one at startup, so the loopback API is never left open.
-- **Dashboard auth** — set `AGENT_AUTH_TOKEN` to require a Bearer token on the dashboard API.
+- **Dashboard auth** — all dashboard routes require either the configured `AGENT_AUTH_TOKEN`
+  Bearer token or `BASIC_AUTH_USER` + `BASIC_AUTH_PASS`; only `/api/health` is public. The
+  server refuses to start in production when neither strategy is configured.
 - **Secret masking** — `safeConfig()` recursively masks any secret-named field (tokens, keys,
   webhooks) in all SSE broadcasts and API responses.
 - **Order idempotency + startup reconciliation** — every broker submit carries a client order
@@ -213,9 +215,11 @@ ALPACA_PUBLIC_KEY=your_alpaca_public_key
 ALPACA_SECRET_KEY=your_alpaca_secret_key
 ALPACA_ENDPOINT=https://paper-api.alpaca.markets
 
+# Required for dashboard access
+AGENT_AUTH_TOKEN=your_secret_token    # Bearer token (or use BASIC_AUTH_USER/PASS)
+
 # Optional
 GEMINI_API_KEY=your_gemini_key        # AI news cleaning
-AGENT_AUTH_TOKEN=your_secret_token    # Protect dashboard API
 AGENT_PORT=3737                       # Dashboard port
 ```
 

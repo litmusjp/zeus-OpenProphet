@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  portForAgent, alpacaTradingUrl, resolveAgentModel,
+  portForAgent, allocateSandboxPort, alpacaTradingUrl, resolveAgentModel,
   DEFAULT_AGENT_MODEL, ALPACA_PAPER_TRADING_URL, ALPACA_LIVE_TRADING_URL,
   BEAT_TIMEOUT_MS, SIGKILL_GRACE_MS, DEFAULT_MAX_TOOL_ROUNDS, BEAT_BACKOFF,
 } from '../agent/defaults.js';
@@ -25,6 +25,16 @@ test('portForAgent is byte-for-byte identical to the original port algorithm', (
     const p = portForAgent(id, 4534);
     assert.ok(p >= 4535 && p <= 4544, `${id} -> ${p} out of range`);
   }
+});
+
+test('allocateSandboxPort resolves hash collisions deterministically', () => {
+  const colliding = ['sbx_00000009', 'sbx_0000000a'];
+  assert.equal(portForAgent(colliding[0], 4534), portForAgent(colliding[1], 4534));
+  const first = allocateSandboxPort(colliding[0], colliding, 4534);
+  const second = allocateSandboxPort(colliding[1], colliding, 4534);
+  assert.notEqual(first, second);
+  assert.equal(first, allocateSandboxPort(colliding[0], colliding, 4534));
+  assert.equal(second, allocateSandboxPort(colliding[1], colliding, 4534));
 });
 
 test('alpacaTradingUrl never infers live and honors an explicit override', () => {

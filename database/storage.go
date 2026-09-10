@@ -387,6 +387,12 @@ func (s *LocalStorage) SaveSignal(symbol, signalType, strategyName, reason strin
 
 // SaveManagedPosition saves a managed position to the database
 func (s *LocalStorage) SaveManagedPosition(position *models.DBManagedPosition) error {
+	var existing models.DBManagedPosition
+	if err := s.db.Where("position_id = ?", position.PositionID).First(&existing).Error; err == nil {
+		position.ID = existing.ID
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("failed to find existing managed position: %w", err)
+	}
 	result := s.db.Save(position)
 	if result.Error != nil {
 		return fmt.Errorf("failed to save managed position: %w", result.Error)
