@@ -43,6 +43,21 @@ export function portForAgent(agentId, basePort = DEFAULT_TRADING_BOT_PORT) {
   return basePort + offset;
 }
 
+// Resolve the stable hash candidate against the complete sandbox set. Existing
+// callers retain portForAgent's contract, while concurrent sandboxes get unique
+// deterministic ports through linear probing.
+export function allocateSandboxPort(agentId, sandboxIds = [], basePort = DEFAULT_TRADING_BOT_PORT) {
+  const ids = [...new Set([...sandboxIds, agentId].map(id => String(id || 'default')))].sort();
+  const used = new Set();
+  for (const id of ids) {
+    let port = portForAgent(id, basePort);
+    while (used.has(port)) port += 1;
+    used.add(port);
+    if (id === String(agentId || 'default')) return port;
+  }
+  throw new Error(`Unable to allocate a trading endpoint for sandbox ${agentId}`);
+}
+
 // ── Harness operational policy ─────────────────────────────────────
 // Extracted verbatim from agent/harness.js. SIGKILL fallback + restart behavior remain
 // invariants; only these durations/limits are named here.

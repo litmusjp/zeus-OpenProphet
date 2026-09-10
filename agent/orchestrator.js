@@ -1,13 +1,15 @@
 import { EventEmitter } from 'events';
 import http from 'http';
+import net from 'net';
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { spawn, execSync } from 'child_process';
 import axios from 'axios';
+import { randomBytes } from 'crypto';
 
 import { AgentHarness } from './harness.js';
-import { alpacaTradingUrl, portForAgent } from './defaults.js';
+import { alpacaTradingUrl, allocateSandboxPort } from './defaults.js';
 import {
   getSandbox,
   getSandboxes,
@@ -26,12 +28,12 @@ const HARNESS_EVENTS = [
   'tool_call', 'tool_result', 'heartbeat_change', 'schedule', 'trade',
 ];
 
-function portOffsetForSandbox(sandboxId) {
-  let hash = 0;
-  for (const char of String(sandboxId || 'default')) {
-    hash = (hash * 31 + char.charCodeAt(0)) % 1000;
-  }
-  return hash;
+function assertPortAvailable(port) {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once('error', error => reject(error));
+    probe.listen(port, '127.0.0.1', () => probe.close(resolve));
+  });
 }
 
 export class AgentOrchestrator extends EventEmitter {
@@ -46,8 +48,9 @@ export class AgentOrchestrator extends EventEmitter {
   }
 
   getSandboxPort(sandboxId) {
-    // Deterministic per-sandbox port via the shared, tested allocation policy.
-    return portForAgent(sandboxId, this.tradingBotBasePort);
+    const existing = this.runtimes.get(sandboxId);
+    if (existing) return existing.port;
+    return allocateSandboxPort(sandboxId, getSandboxes().map(sandbox => sandbox.id), this.tradingBotBasePort);
   }
 
   getSandboxDbPath(sandboxId) {
@@ -80,7 +83,7 @@ export class AgentOrchestrator extends EventEmitter {
     const port = this.getSandboxPort(sandboxId);
     const tradingBotUrl = `http://127.0.0.1:${port}`;
     const goHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 10, keepAliveMsecs: 30000 });
-    const tradingBotToken = process.env.TRADING_BOT_TOKEN || '';
+    const tradingBotToken = randomBytes(32).toString('hex');
     const goAxios = axios.create({
       baseURL: tradingBotUrl,
       httpAgent: goHttpAgent,
@@ -118,6 +121,8 @@ export class AgentOrchestrator extends EventEmitter {
       goAxios,
       goReady: false,
       goProc: null,
+      goExited: null,
+      tradingBotToken,
       harness,
     };
 
@@ -161,6 +166,11 @@ export class AgentOrchestrator extends EventEmitter {
     if (!account) throw new Error(`Account not found for sandbox ${sandboxId}`);
 
     await this.stopGoBackend(sandboxId);
+    try {
+      await assertPortAvailable(runtime.port);
+    } catch (error) {
+      throw new Error(`Trading endpoint ${runtime.port} is occupied for sandbox ${sandboxId}: ${error.message}`);
+    }
     await this._ensureBinary();
     await fs.mkdir(path.dirname(this.getSandboxDbPath(sandboxId)), { recursive: true });
 
@@ -172,7 +182,7 @@ export class AgentOrchestrator extends EventEmitter {
       ALPACA_PAPER: account.paper ? 'true' : 'false',
       PORT: String(runtime.port),
       SERVER_HOST: '127.0.0.1',
-      TRADING_BOT_TOKEN: process.env.TRADING_BOT_TOKEN || '',
+      TRADING_BOT_TOKEN: runtime.tradingBotToken,
       DATABASE_PATH: this.getSandboxDbPath(sandboxId),
       ACTIVITY_LOG_DIR: path.join(this.projectRoot, 'data', 'sandboxes', account.id, 'activity_logs'),
       OPENPROPHET_SANDBOX_ID: sandboxId,
@@ -187,6 +197,11 @@ export class AgentOrchestrator extends EventEmitter {
     });
 
     runtime.goReady = false;
+    runtime.goExited = null;
+    runtime.goProc.once('error', error => {
+      runtime.goExited = error;
+      runtime.goReady = false;
+    });
 
     runtime.goProc.stdout.on('data', chunk => {
       const message = chunk.toString().trim();
@@ -213,6 +228,9 @@ export class AgentOrchestrator extends EventEmitter {
     runtime.goProc.on('exit', (code, signal) => {
       runtime.goReady = false;
       runtime.goProc = null;
+      if (code !== 0 && signal !== 'SIGTERM') {
+        runtime.goExited = new Error(`backend exited (code: ${code}, signal: ${signal})`);
+      }
       this.emit('agent_log', {
         sandboxId,
         level: code === 0 || signal === 'SIGTERM' ? 'info' : 'error',
@@ -222,8 +240,15 @@ export class AgentOrchestrator extends EventEmitter {
 
     for (let i = 0; i < 20; i++) {
       await new Promise(resolve => setTimeout(resolve, 500));
+      if (runtime.goExited) {
+        throw new Error(`Trading backend failed for sandbox ${sandboxId}: ${runtime.goExited.message}`);
+      }
       try {
-        await runtime.goAxios.get('/health', { timeout: 2000 });
+        const health = await runtime.goAxios.get('/health', { timeout: 2000 });
+        const identity = health.data || {};
+        if (identity.sandbox_id !== sandboxId || identity.account_id !== account.id) {
+          throw new Error(`health identity mismatch (sandbox=${identity.sandbox_id}, account=${identity.account_id})`);
+        }
         runtime.goReady = true;
         this.emit('agent_log', {
           sandboxId,
@@ -231,7 +256,11 @@ export class AgentOrchestrator extends EventEmitter {
           message: `Trading backend ready on port ${runtime.port} for ${account.name}`,
         });
         return runtime;
-      } catch {
+      } catch (error) {
+        if (String(error.message || '').includes('health identity mismatch')) {
+          await this.stopGoBackend(sandboxId);
+          throw error;
+        }
         // keep waiting
       }
     }

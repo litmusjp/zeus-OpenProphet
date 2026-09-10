@@ -194,15 +194,20 @@ func setupRouter(orderController *controllers.OrderController, newsController *c
 		c.Next()
 	})
 
-	// Health check
+	// Health check includes identity so a colliding sandbox cannot mistake another
+	// backend's healthy response for its own.
 	router.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "healthy"})
+		c.JSON(200, gin.H{
+			"status":     "healthy",
+			"sandbox_id": os.Getenv("OPENPROPHET_SANDBOX_ID"),
+			"account_id": os.Getenv("OPENPROPHET_ACCOUNT_ID"),
+		})
 	})
 
 	// Trading endpoints
 	api := router.Group("/api/v1")
 	api.Use(func(c *gin.Context) {
-		if config.AppConfig.AuthToken == "" || c.GetHeader("Authorization") == "Bearer "+config.AppConfig.AuthToken {
+		if config.AppConfig.AuthToken != "" && c.GetHeader("Authorization") == "Bearer "+config.AppConfig.AuthToken {
 			c.Next()
 			return
 		}
